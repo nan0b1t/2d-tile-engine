@@ -4,6 +4,7 @@
 #include "nums.h"
 #include "stdlib.h"
 
+#define BLOCK_SIZE 16
 
 double magicHash(i32 x, i32 seed) {
     uint32_t state = (i32)x + ((i32)seed * 0x9E3779B9U);
@@ -57,62 +58,66 @@ void endWorld(World *world) {
 
 typedef struct Game {
     World world;
-    int (*init)(struct Game game);
-    int (*update)(struct Game game);
-    int (*end)(struct Game game);
+    int (*init)(struct Game *game);
+    int (*update)(struct Game *game);
+    int (*end)(struct Game *game);
 } Game;
 
 int runGame(Game game) {
-    int result = game.init(game);
+    int result = game.init(&game);
     if (result) return result;
 
-    while (game.update(game)) {}
+    while (game.update(&game)) {}
 
-    return game.end(game);
+    return game.end(&game);
 }
 
-int initGame() {
-    int32_t world_seed = 67;
-    double step_size = 0.1; // Smaller number = smoother, wider hills
-    int total_steps = 100;
+void setColFromBottom(World* world, int height, int x, u32 block) {
+    for (int i = world->height - 1; i >= world->height - height - 1; i --) {
+        world->blocks[i * world->width + x] = block;
+    }
+}
 
-    printf("Testing Seeded 1D Perlin Noise (Seed: %d):\n", world_seed);
-    printf("--------------------------------------------------\n");
+int initGame(Game *game) {
+    game->world = getWorld(50, 50);
 
-    for (int step = 0; step < total_steps; step++) {
-        double x = step * step_size;
-        double val = noise(x, world_seed);
-
-        // Convert the noise value (-1.0 to 1.0) into spaces for a text graph
-        // This maps the value cleanly to a width of 0 to 40 characters
-        int graph_width = (int)((val + 1.0) * 20.0);
-        
-        // Print the coordinate, raw value, and the visual wave
-        printf("X: %4.2f (%+6.3f) | ", x, val);
-        for (int s = 0; s < graph_width; s++) {
-            printf(" ");
-        }
-        printf("*\n"); // The point on our curve
+    for (int i = 0; i < game->world.width; i++) {
+        int height = noise(i * 0.01, 67);
+        setColFromBottom(&game->world,  game->world.height * (height + 0.5), i, 1);
     }
 
     InitWindow(800, 600, "random block game idk bro");
     return 0;
 }
 
-int updateGame() {
+int updateGame(Game *game) {
     if (WindowShouldClose()) {
         return 0;
     }
     BeginDrawing();
     ClearBackground(RAYWHITE);
+    for (int i = 0; i < game->world.width * game->world.height; i++) {
+        switch (game->world.blocks[i]) {
+            case 1:
+                DrawRectangle(i % game->world.width * BLOCK_SIZE,
+                              i / game->world.width * BLOCK_SIZE,
+                              BLOCK_SIZE,
+                              BLOCK_SIZE,
+                              (Color){150, 75, 0, 255}
+                );
+                break;
+        }
+    }
     EndDrawing();
     return 1;
 }
 
-int endGame() {
+int endGame(Game *game) {
+    endWorld(&game->world);
     CloseWindow();
     return 0;
 }
+
 int main() {
     Game game;
     game.init = initGame;
