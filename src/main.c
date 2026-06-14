@@ -130,7 +130,7 @@ int updateGame(Game *game) {
         int projX = ((i % game->world.width) * BLOCK_SIZE) + game->camera.x;
         int projY = ((i / game->world.width) * BLOCK_SIZE) + game->camera.y;
 
-        if ((projX < 0 || projX > GetScreenWidth()) || (projY < 0 || projY > GetScreenHeight())) {
+        if ((projX < 0 - BLOCK_SIZE || projX > GetScreenWidth()) || (projY < 0 - BLOCK_SIZE || projY > GetScreenHeight())) {
             continue;
         }
 
