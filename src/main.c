@@ -127,6 +127,13 @@ int updateGame(Game *game) {
     BeginDrawing();
     ClearBackground(RAYWHITE);
     for (int i = 0; i < game->world.width * game->world.height; i++) {
+        int projX = ((i % game->world.width) * BLOCK_SIZE) + game->camera.x;
+        int projY = ((i / game->world.width) * BLOCK_SIZE) + game->camera.y;
+
+        if ((projX < 0 || projX > GetScreenWidth()) || (projY < 0 || projY > GetScreenHeight())) {
+            continue;
+        }
+
         switch (game->world.blocks[i]) {
             case 1:
                 DrawRectangle(i % game->world.width * BLOCK_SIZE + game->camera.x,
