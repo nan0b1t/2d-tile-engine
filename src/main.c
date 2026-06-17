@@ -12,7 +12,7 @@
     ((val) < (min) ? (min) : ((val) > (max) ? (max) : (val)))
 
 #define CHUNK_SIZE 32
-#define TABLE_SIZE 2048
+#define TABLE_SIZE 16
 
 #if defined(_MSC_VER)
 /* MSVC Style */
@@ -26,14 +26,32 @@
 #define PACK_ATTR __attribute__((packed))
 #endif
 
+static inline u32 betterModulo(i32 x, i32 y) {
+    x = x % y;
+    if (x < 0) x += y;
+    return x;
+}
+
 enum { SLOT_EMPTY = 0, SLOT_FULL = 1, TOMBSTONE = 2 };
 
 typedef struct Point {
     i32 x; i32 y;
 } Point;
 
+typedef struct BlockBits {
+    u32 foreground : 12;
+    u32 background : 10;
+    u32 light      :  5;
+    u32 data       :  5;
+} BlockBits;
+
+typedef union Tile {
+    BlockBits bits;
+    u32       data;
+} Tile;
+
 typedef struct Chunk {
-    int blocks[CHUNK_SIZE * CHUNK_SIZE];
+    Tile blocks[CHUNK_SIZE * CHUNK_SIZE];
 } Chunk;
 
 PACK_START typedef struct TableMeta {
@@ -130,6 +148,39 @@ void setChunk(ChunkMap *chunkMap, i32 x, i32 y, Chunk *chunk) {
     chunkMap->meta[targChunk].state = SLOT_FULL;
 }
 
+Chunk *touchChunk(ChunkMap *chunkMap, i32 x, i32 y) {
+    u32 hash = getTableIndex(x, y);
+    u32 startHash = hash;
+    i32 targChunk = -1;
+
+    while (1) {
+        if (chunkMap->meta[hash].state == SLOT_FULL &&
+            chunkMap->meta[hash].x == x && chunkMap->meta[hash].y == y
+        ) {
+            return &chunkMap->chunks[hash];
+        }
+        if ((chunkMap->meta[hash].state == TOMBSTONE ||
+             chunkMap->meta[hash].state == SLOT_EMPTY) &&
+            targChunk == -1) {
+            targChunk = hash;
+        }
+        if (chunkMap->meta[hash].state == SLOT_EMPTY) {
+            break;
+        }
+        hash = (hash + 1) & (TABLE_SIZE - 1);
+        if (hash == startHash) {
+            break;
+        }
+    }
+    if (targChunk == -1) {
+        return NULL;
+    }
+    chunkMap->meta[targChunk].x = x;
+    chunkMap->meta[targChunk].y = y;
+    chunkMap->meta[targChunk].state = SLOT_FULL;
+    return &chunkMap->chunks[targChunk];
+}
+
 void removeChunk(ChunkMap *chunkMap, i32 x, i32 y) {
     unsigned int index = getTableIndex(x, y);
     unsigned int start_index = index;
@@ -142,6 +193,23 @@ void removeChunk(ChunkMap *chunkMap, i32 x, i32 y) {
         index = (index + 1) % TABLE_SIZE;
         if (index == start_index)
             break;
+    }
+}
+
+void collectGarbage(ChunkMap *chunkMap, i32 playerX, i32 playerY, i32 renderDistChunks) {
+    Point playerChunk;
+    playerChunk.x = betterModulo(playerX, CHUNK_SIZE);
+    playerChunk.y = betterModulo(playerY, CHUNK_SIZE);
+
+    for (i32 i = 0; i < TABLE_SIZE; i++) {
+        if (chunkMap->meta[i].state == SLOT_FULL &&
+           (chunkMap->meta[i].x <= playerChunk.x - renderDistChunks ||
+            chunkMap->meta[i].x >= playerChunk.x + renderDistChunks ||
+            chunkMap->meta[i].y <= playerChunk.y - renderDistChunks ||
+            chunkMap->meta[i].y >= playerChunk.y + renderDistChunks) 
+        ) {
+            chunkMap->meta[i].state = TOMBSTONE;
+        }
     }
 }
 
@@ -170,11 +238,6 @@ Point localToBlock(i32 x, i32 y, Camera camera) {
     };
 }
 
-inline u32 betterModulo(i32 x, i32 y) {
-    x = x % y;
-    if (x < 0) x += y;
-    return x;
-}
 
 Point globalToBlock(i32 x, i32 y) {
     return (Point) {
@@ -188,6 +251,24 @@ Point blockToChunk(i32 x, i32 y) {
         .x = betterModulo(x, CHUNK_SIZE),
         .y = betterModulo(y, CHUNK_SIZE)
     };
+}
+
+void fillColBottom(u32 *chunk, int col, int fillSize, u32 fillVal, u32 emptyVal) {
+    if (col < 0 || col >= CHUNK_SIZE) return;
+
+    if (fillSize > CHUNK_SIZE) fillSize = CHUNK_SIZE;
+
+    for (int row = CHUNK_SIZE - 1; row >= 0; row--) {
+        int flatIndex = (row * CHUNK_SIZE) + col;
+
+        int stepsFromBottom = (CHUNK_SIZE - 1) - row;
+
+        if (stepsFromBottom < fillSize) {
+            chunk[flatIndex] = fillVal;
+        } else {
+            chunk[flatIndex] = emptyVal;
+        }
+    }
 }
 
 double magicHash(i32 x, i32 seed) {
@@ -220,6 +301,38 @@ double noise(double i, i32 seed) {
     double higherPull = higherDist * higherVal;
 
     return lowerPull + magicFade(lowerDist) * (higherPull - lowerPull);
+}
+
+void generateChunk(i32 x, i32 y, Chunk *chunk) {
+    i32 worldX = x * CHUNK_SIZE;
+    i32 worldY = y * CHUNK_SIZE;
+
+    for (int i = 0; i < CHUNK_SIZE * CHUNK_SIZE; i++) {
+        i32 col = worldX + (i % CHUNK_SIZE);
+        i32 colVal = (noise(0.015, 67) + 0.5) * BASE_HEIGHT;
+
+        Tile colFill;
+        colFill.data = 0;
+        colFill.bits.foreground = 1;
+
+        fillColBottom(&chunk->blocks->data, col, colVal - (y * CHUNK_SIZE), colFill.data, 0);
+    }
+}
+
+void updateChunks(ChunkMap *map, i32 x, i32 y) {
+    Point chunks[1];
+    chunks[0] = blockToChunk(x, y);
+
+    Chunk blank;
+
+    int length = sizeof(chunks) / sizeof(chunks[0]); 
+    for (int i = 0; i < length; i++) {
+        if (getChunk(map, chunks[i].x, chunks[i].y) == NULL) {
+            generateChunk(chunks[i].x, chunks[i].y, touchChunk(map, chunks[i].x, chunks[i].y));
+        }
+    }
+
+    collectGarbage(map, x, y, 1);
 }
 
 typedef struct {
@@ -274,18 +387,13 @@ void setColFromBottom(World *world, int height, int x, u32 block) {
 }
 
 int initGame(Game *game) {
-    game->world = getWorld(1600, BASE_HEIGHT + 50);
     game->camera.x = 0;
     game->camera.y = 0;
 
-    double amp = 0.015;
-
-    for (int i = 0; i < game->world.width; i++) {
-        double height = noise(i * amp, 47);
-        setColFromBottom(&game->world,
-                         BASE_HEIGHT + (game->world.height - BASE_HEIGHT) *
-                                           (height + 0.5),
-                         i, 1);
+    game->chunkMap = calloc(1, sizeof(ChunkMap));
+    if (game->chunkMap == NULL) {
+        perror("couldn't allocate chunkmap");
+        exit(1);
     }
 
     InitWindow(800, 600, "random block game idk bro");
@@ -296,6 +404,8 @@ int updateGame(Game *game) {
     if (WindowShouldClose()) {
         return 0;
     }
+
+    updateChunks(game->chunkMap, game->camera.x, game->camera.y);
 
     if (IsKeyDown(KEY_A))
         game->camera.x -= 5;
@@ -308,29 +418,12 @@ int updateGame(Game *game) {
 
     BeginDrawing();
     ClearBackground(RAYWHITE);
-    for (int i = 0; i < game->world.width * game->world.height; i++) {
-        int projX = ((i % game->world.width) * BLOCK_SIZE) + game->camera.x;
-        int projY = ((i / game->world.width) * BLOCK_SIZE) + game->camera.y;
-
-        if ((projX < 0 - BLOCK_SIZE || projX > GetScreenWidth()) ||
-            (projY < 0 - BLOCK_SIZE || projY > GetScreenHeight())) {
-            continue;
-        }
-
-        switch (game->world.blocks[i]) {
-        case 1:
-            DrawRectangle(i % game->world.width * BLOCK_SIZE + game->camera.x,
-                          i / game->world.width * BLOCK_SIZE + game->camera.y,
-                          BLOCK_SIZE, BLOCK_SIZE, (Color){150, 75, 0, 255});
-            break;
-        }
-    }
     EndDrawing();
     return 1;
 }
 
 int endGame(Game *game) {
-    endWorld(&game->world);
+    free(game->chunkMap);
     CloseWindow();
     return 0;
 }
