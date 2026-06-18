@@ -7,7 +7,7 @@
 #include <stdio.h>
 
 #define BASE_HEIGHT 200
-#define BLOCK_SIZE 4
+#define BLOCK_SIZE 2
 #define CLAMP(val, min, max)                                                   \
     ((val) < (min) ? (min) : ((val) > (max) ? (max) : (val)))
 
@@ -27,6 +27,8 @@
 #define PACK_END
 #define PACK_ATTR __attribute__((packed))
 #endif
+
+int frame = 0;
 
 static inline u32 betterModulo(i32 x, i32 y) {
     x = x % y;
@@ -270,6 +272,10 @@ Point blockToChunk(i32 x, i32 y) {
 }
 
 void fillColBottom(u32 *chunk, int col, int fillSize, u32 fillVal, u32 emptyVal) {
+    printf("DEBUG fillCol: col=%d fillSize=%d CHUNK_SIZE=%d row0_val=%u lastRow_val=%u\n",
+            col, fillSize, CHUNK_SIZE,
+            chunk[0 * CHUNK_SIZE + col], chunk[(CHUNK_SIZE-1) * CHUNK_SIZE + col]);
+
     if (col < 0 || col >= CHUNK_SIZE) return;
 
     if (fillSize > CHUNK_SIZE) fillSize = CHUNK_SIZE;
@@ -320,17 +326,16 @@ double noise(double i, i32 seed) {
 }
 
 void generateChunk(i32 x, i32 y, Chunk *chunk) {
-
     i32 worldX = x * CHUNK_SIZE;
     i32 worldY = y * CHUNK_SIZE;
 
     for (int i = 0; i < CHUNK_SIZE; i++) {
         i32 localCol = i;
-        i32 globalCol = worldX * CHUNK_SIZE + localCol;
+        i32 globalCol = worldX + localCol;
 
-        i32 colVal = (noise(globalCol * 0.015, 67) + 0.5) * BASE_HEIGHT;
+        i32 colVal = (noise(globalCol * 0.004, 67) + 0.5) * BASE_HEIGHT;
 
-        i32 fillSize = colVal - worldY;
+        i32 fillSize = worldY + CHUNK_SIZE - colVal;
 
         if (fillSize < 0) fillSize = 0;
         if (fillSize > CHUNK_SIZE) fillSize = CHUNK_SIZE;
@@ -340,6 +345,9 @@ void generateChunk(i32 x, i32 y, Chunk *chunk) {
         colFill.bits.foreground = 1;
 
         fillColBottom((u32*)chunk->blocks, localCol, fillSize, colFill.data, 0);
+
+        printf("DEBUG gen col: chunk(%d,%d) worldY=%d globalCol=%d colVal=%d fillSize=%d\n",
+            x, y, worldY, globalCol, colVal, fillSize);
     }
 }
 
@@ -356,6 +364,9 @@ void updateChunks(ChunkMap *map, i32 x, i32 y, i32 renderDistChunks) {
 
     for (int i = centerChunkX - renderDistChunks; i < centerChunkX + renderDistChunks; i++) {
         for (int j = centerChunkY - renderDistChunks; j < centerChunkY + renderDistChunks; j++) {
+            printf("DEBUG chunks: i=%d j=%d centerChunkX=%d centerChunkY=%d camX=%d camY=%d\n",
+                i, j, centerChunkX, centerChunkY, x, y);
+
             Chunk *chunk = getChunkMut(map, i, j);
             if (chunk == NULL) {
                 chunk = touchChunk(map, i, j).chunk;
@@ -420,8 +431,8 @@ int runGame(Game game) {
 }
 
 int initGame(Game *game) {
-    game->camera.x = 0;
-    game->camera.y = 0;
+    game->camera.x = 10;
+    game->camera.y = 10;
 
     game->chunkMap = calloc(1, sizeof(ChunkMap));
     if (game->chunkMap == NULL) {
@@ -452,6 +463,7 @@ int updateGame(Game *game) {
     ClearBackground(RAYWHITE);
     updateChunks(game->chunkMap, game->camera.x, game->camera.y, 8);
     EndDrawing();
+    frame++;
     return 1;
 }
 
