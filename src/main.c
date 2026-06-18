@@ -12,7 +12,7 @@
     ((val) < (min) ? (min) : ((val) > (max) ? (max) : (val)))
 
 #define CHUNK_SIZE 32
-#define TABLE_SIZE 128
+#define TABLE_SIZE 2048
 
 #define CHUNK_MNGR_ACTIVE_CHUNKS_SIZE 16
 
@@ -214,8 +214,8 @@ void removeChunk(ChunkMap *chunkMap, i32 x, i32 y) {
 
 void collectGarbage(ChunkMap *chunkMap, i32 playerX, i32 playerY, i32 renderDistChunks) {
     Point playerChunk;
-    playerChunk.x = betterModulo(playerX, CHUNK_SIZE);
-    playerChunk.y = betterModulo(playerY, CHUNK_SIZE);
+    playerChunk.x = playerX / (CHUNK_SIZE * BLOCK_SIZE);
+    playerChunk.y = playerY / (CHUNK_SIZE * BLOCK_SIZE);
 
     for (i32 i = 0; i < TABLE_SIZE; i++) {
         if (chunkMap->meta[i].state == SLOT_FULL &&
@@ -325,16 +325,13 @@ void generateChunk(i32 x, i32 y, Chunk *chunk) {
     i32 worldY = y * CHUNK_SIZE;
 
     for (int i = 0; i < CHUNK_SIZE; i++) {
-         i32 localCol = i;
-        i32 globalCol = worldX + localCol;
+        i32 localCol = i;
+        i32 globalCol = worldX * CHUNK_SIZE + localCol;
 
-        // Run your noise function using the seamless global coordinate
         i32 colVal = (noise(globalCol * 0.015, 67) + 0.5) * BASE_HEIGHT;
 
-        // Calculate vertical fill limits for this specific chunk row
         i32 fillSize = colVal - worldY;
 
-        // FIX 3: Safety clamp to ensure it never reads/writes out of bounds
         if (fillSize < 0) fillSize = 0;
         if (fillSize > CHUNK_SIZE) fillSize = CHUNK_SIZE;
 
@@ -342,7 +339,6 @@ void generateChunk(i32 x, i32 y, Chunk *chunk) {
         colFill.data = 0;
         colFill.bits.foreground = 1;
 
-        // FIX 4: Pass localCol (0 to 31) so it maps cleanly inside chunk->blocks
         fillColBottom((u32*)chunk->blocks, localCol, fillSize, colFill.data, 0);
     }
 }
@@ -373,15 +369,12 @@ void updateChunks(ChunkMap *map, i32 x, i32 y, i32 renderDistChunks) {
             for (int b = 0; b < CHUNK_SIZE * CHUNK_SIZE; b++) {
                 switch (chunk->blocks[b].bits.foreground) {
                     case 1: ;
-                        // FIX 2: Correctly isolate local block grid coordinates
                         int localBlockX = b % CHUNK_SIZE;
                         int localBlockY = b / CHUNK_SIZE;
 
-                        // FIX 3: Multiply BOTH chunk positions AND local block offsets by BLOCK_SIZE
                         int worldPixelX = (i * CHUNK_SIZE + localBlockX) * BLOCK_SIZE;
                         int worldPixelY = (j * CHUNK_SIZE + localBlockY) * BLOCK_SIZE;
 
-                        // FIX 4: SUBTRACT camera pixel values (x, y) to move into screen space
                         int drawX = worldPixelX - x;
                         int drawY = worldPixelY - y;
 
@@ -389,22 +382,12 @@ void updateChunks(ChunkMap *map, i32 x, i32 y, i32 renderDistChunks) {
                                       BLOCK_SIZE, BLOCK_SIZE,
                                       (Color) {.r = 150, .g = 75, .b = 0, .a = 255});
                         break;
-                    // case 1:
-                    //     DrawRectangle(i * CHUNK_SIZE * BLOCK_SIZE + x + (b % CHUNK_SIZE),
-                    //                   j * CHUNK_SIZE * BLOCK_SIZE + y + (b / CHUNK_SIZE),
-                    //                   BLOCK_SIZE, BLOCK_SIZE,
-                    //                   (Color) {.r = 150, .g = 75, .b = 0, .a = 255});
                 }
             }
         }
     }
 }
 
-typedef struct {
-    u32 *blocks;
-    u32 width;
-    u32 height;
-} World;
 
 ChunkMap *getWorld() {
     ChunkMap *result = calloc(1, sizeof(ChunkMap));
@@ -414,10 +397,6 @@ ChunkMap *getWorld() {
     }
 
     return result;
-}
-
-void endWorld(World *world) {
-    free(world->blocks);
 }
 
 typedef struct Game {
@@ -438,17 +417,6 @@ int runGame(Game game) {
     }
 
     return game.end(&game);
-}
-
-void setColFromBottom(World *world, int height, int x, u32 block) {
-    height = CLAMP(height, 0, (int)world->height);
-
-    int start = (int)world->height - 1;
-    int end = (int)world->height - height;
-
-    for (int y = start; y >= end; --y) {
-        world->blocks[y * world->width + x] = block;
-    }
 }
 
 int initGame(Game *game) {
@@ -481,8 +449,8 @@ int updateGame(Game *game) {
         game->camera.y += 5;
 
     BeginDrawing();
-    updateChunks(game->chunkMap, game->camera.x, game->camera.y, 3);
     ClearBackground(RAYWHITE);
+    updateChunks(game->chunkMap, game->camera.x, game->camera.y, 8);
     EndDrawing();
     return 1;
 }
