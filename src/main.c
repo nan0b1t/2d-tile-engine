@@ -345,6 +345,11 @@ void generateChunk(i32 x, i32 y, Chunk *chunk) {
         colFill.bits.foreground = 1;
 
         fillColBottom((u32*)chunk->blocks, localCol, fillSize, colFill.data, 0);
+        if (fillSize <= CHUNK_SIZE) {
+            if (chunk->blocks[fillSize * CHUNK_SIZE + i].bits.foreground == 0) {
+                chunk->blocks[fillSize * CHUNK_SIZE + i].bits.foreground = 2;
+            }
+        }
 
         printf("DEBUG gen col: chunk(%d,%d) worldY=%d globalCol=%d colVal=%d fillSize=%d\n",
             x, y, worldY, globalCol, colVal, fillSize);
@@ -378,20 +383,27 @@ void updateChunks(ChunkMap *map, i32 x, i32 y, i32 renderDistChunks) {
             }
 
             for (int b = 0; b < CHUNK_SIZE * CHUNK_SIZE; b++) {
+                int localBlockX = b % CHUNK_SIZE;
+                int localBlockY = b / CHUNK_SIZE;
+
+                int worldPixelX = (i * CHUNK_SIZE + localBlockX) * BLOCK_SIZE;
+                int worldPixelY = (j * CHUNK_SIZE + localBlockY) * BLOCK_SIZE;
+
+                int drawX = worldPixelX - x;
+                int drawY = worldPixelY - y;
+
+
                 switch (chunk->blocks[b].bits.foreground) {
                     case 1: ;
-                        int localBlockX = b % CHUNK_SIZE;
-                        int localBlockY = b / CHUNK_SIZE;
-
-                        int worldPixelX = (i * CHUNK_SIZE + localBlockX) * BLOCK_SIZE;
-                        int worldPixelY = (j * CHUNK_SIZE + localBlockY) * BLOCK_SIZE;
-
-                        int drawX = worldPixelX - x;
-                        int drawY = worldPixelY - y;
-
                         DrawRectangle(drawX, drawY,
                                       BLOCK_SIZE, BLOCK_SIZE,
                                       (Color) {.r = 150, .g = 75, .b = 0, .a = 255});
+                        break;
+
+                    case 2:
+                        DrawRectangle(drawX, drawY,
+                                      BLOCK_SIZE, BLOCK_SIZE,
+                                      (Color) {.r = 124, .g = 189, .b = 107, .a = 255});
                         break;
                 }
             }
