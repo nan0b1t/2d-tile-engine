@@ -271,11 +271,7 @@ Point blockToChunk(i32 x, i32 y) {
     };
 }
 
-void fillColBottom(u32 *chunk, int col, int fillSize, u32 fillVal, u32 emptyVal) {
-    printf("DEBUG fillCol: col=%d fillSize=%d CHUNK_SIZE=%d row0_val=%u lastRow_val=%u\n",
-            col, fillSize, CHUNK_SIZE,
-            chunk[0 * CHUNK_SIZE + col], chunk[(CHUNK_SIZE-1) * CHUNK_SIZE + col]);
-
+void fillColBottom(u32 *chunk, int col, int fillSize, u32 fillVal, i32 emptyVal) {
     if (col < 0 || col >= CHUNK_SIZE) return;
 
     if (fillSize > CHUNK_SIZE) fillSize = CHUNK_SIZE;
@@ -287,7 +283,7 @@ void fillColBottom(u32 *chunk, int col, int fillSize, u32 fillVal, u32 emptyVal)
 
         if (stepsFromBottom < fillSize) {
             chunk[flatIndex] = fillVal;
-        } else {
+        } else if (emptyVal != -1){
             chunk[flatIndex] = emptyVal;
         }
     }
@@ -340,19 +336,17 @@ void generateChunk(i32 x, i32 y, Chunk *chunk) {
         if (fillSize < 0) fillSize = 0;
         if (fillSize > CHUNK_SIZE) fillSize = CHUNK_SIZE;
 
-        Tile colFill;
-        colFill.data = 0;
-        colFill.bits.foreground = 1;
+        Tile dirt;
+        dirt.data = 0;
+        dirt.bits.foreground = 1;
 
-        fillColBottom((u32*)chunk->blocks, localCol, fillSize, colFill.data, 0);
-        if (fillSize <= CHUNK_SIZE) {
-            if (chunk->blocks[fillSize * CHUNK_SIZE + i].bits.foreground == 0) {
-                chunk->blocks[fillSize * CHUNK_SIZE + i].bits.foreground = 2;
-            }
-        }
+        Tile grass;
+        grass.data = 0;
+        grass.bits.foreground = 2;
 
-        printf("DEBUG gen col: chunk(%d,%d) worldY=%d globalCol=%d colVal=%d fillSize=%d\n",
-            x, y, worldY, globalCol, colVal, fillSize);
+        fillColBottom((u32*)chunk->blocks, localCol, fillSize + 1, grass.data, 0);
+        fillColBottom((u32*)chunk->blocks, localCol, fillSize, dirt.data, -1);
+
     }
 }
 
@@ -369,9 +363,6 @@ void updateChunks(ChunkMap *map, i32 x, i32 y, i32 renderDistChunks) {
 
     for (int i = centerChunkX - renderDistChunks; i < centerChunkX + renderDistChunks; i++) {
         for (int j = centerChunkY - renderDistChunks; j < centerChunkY + renderDistChunks; j++) {
-            printf("DEBUG chunks: i=%d j=%d centerChunkX=%d centerChunkY=%d camX=%d camY=%d\n",
-                i, j, centerChunkX, centerChunkY, x, y);
-
             Chunk *chunk = getChunkMut(map, i, j);
             if (chunk == NULL) {
                 chunk = touchChunk(map, i, j).chunk;
