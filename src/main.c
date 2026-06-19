@@ -402,14 +402,22 @@ void generateChunk(i32 x, i32 y, Chunk *chunk, ChunkMap *map) {
         Tile dirt;
         dirt.data = 0;
         dirt.bits.foreground = 1;
+        dirt.bits.background = 1;
 
         Tile grass;
         grass.data = 0;
         grass.bits.foreground = 2;
+        grass.bits.background = 2;
 
         Tile stone;
         stone.data = 0;
         stone.bits.foreground = 3;
+        stone.bits.background = 3;
+
+        Tile lava;
+        lava.data = 0;
+        lava.bits.foreground = 4;
+        lava.bits.background = 4;
 
         // fillColBottom((u32*)chunk->blocks, localCol, fillSize, dirt.data, 0);
         i32 grassStart = colVal;
@@ -427,14 +435,18 @@ void generateChunk(i32 x, i32 y, Chunk *chunk, ChunkMap *map) {
             } else if (projY < stoneStart) {
                 chunk->blocks[j * CHUNK_SIZE + i].data = dirt.data;
             } else {
-                chunk->blocks[j * CHUNK_SIZE + i].data = stone.data;
+                if (worldY < 200) {
+                    chunk->blocks[j * CHUNK_SIZE + i].data = stone.data;
+                } else {
+                    chunk->blocks[j * CHUNK_SIZE + i].data = lava.data;
+                }
             }
 
-            if (chunk->blocks[j * CHUNK_SIZE + i].data != 0) {
+            if (chunk->blocks[j * CHUNK_SIZE + i].data != 0 && chunk->blocks[j * CHUNK_SIZE + i].bits.foreground != 4) {
                 double noise = fabs(noise_2d((double)projX * 0.05, (double)projY * 0.05, SEED));
                 double threshold = MIN(MAX(((double)projY / 400) * 0.15, 0.05), 0.15);
                 if (noise < threshold && noise > -threshold) {
-                    chunk->blocks[j * CHUNK_SIZE + i].data = 0;
+                    chunk->blocks[j * CHUNK_SIZE + i].bits.foreground = 0;
                 }
             }
         }
@@ -475,24 +487,58 @@ void updateChunks(ChunkMap *map, i32 x, i32 y, i32 renderDistChunks) {
                 int drawY = worldPixelY - y;
 
 
+                bool drewFG = false;
                 switch (chunk->blocks[b].bits.foreground) {
                     case 1: ;
                         DrawRectangle(drawX, drawY,
                                       BLOCK_SIZE, BLOCK_SIZE,
                                       (Color) {.r = 150, .g = 75, .b = 0, .a = 255});
+                        drewFG = true;
                         break;
 
                     case 2:
                         DrawRectangle(drawX, drawY,
                                       BLOCK_SIZE, BLOCK_SIZE,
                                       (Color) {.r = 124, .g = 189, .b = 107, .a = 255});
+                        drewFG = true;
                         break;
 
                     case 3:
                         DrawRectangle(drawX, drawY,
                                       BLOCK_SIZE, BLOCK_SIZE,
                                       (Color) {.r = 149, .g = 150, .b = 149, .a = 255});
+                        drewFG = true;
                         break;
+
+                    case 4:
+                        DrawRectangle(drawX, drawY,
+                                      BLOCK_SIZE, BLOCK_SIZE,
+                                      (Color) {.r = 255, .g = 165, .b = 0, .a = 255});
+                        drewFG = true;
+                        break;
+
+                }
+
+                if (!drewFG) {
+                    switch (chunk->blocks[b].bits.background) {
+                        case 1: ;
+                            DrawRectangle(drawX, drawY,
+                                          BLOCK_SIZE, BLOCK_SIZE,
+                                          (Color) {.r = 150 * 0.5, .g = 75 * 0.5, .b = 0 * 0.5, .a = 255});
+                            break;
+
+                        case 2:
+                            DrawRectangle(drawX, drawY,
+                                          BLOCK_SIZE, BLOCK_SIZE,
+                                          (Color) {.r = 124 * 0.5, .g = 189 * 0.5, .b = 107 * 0.5, .a = 255});
+                            break;
+
+                        case 3:
+                            DrawRectangle(drawX, drawY,
+                                          BLOCK_SIZE, BLOCK_SIZE,
+                                          (Color) {.r = 149 * 0.5, .g = 150 * 0.5, .b = 149 * 0.5, .a = 255});
+                            break;
+                    }
                 }
             }
 
@@ -571,7 +617,7 @@ int updateGame(Game *game) {
         game->camera.y += 15;
 
     BeginDrawing();
-    ClearBackground(RAYWHITE);
+    ClearBackground(SKYBLUE);
     updateChunks(game->chunkMap, game->camera.x, game->camera.y, 8);
     DrawFPS(5, 5);
     EndDrawing();
