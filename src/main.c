@@ -346,9 +346,10 @@ void generateChunk(i32 x, i32 y, Chunk *chunk) {
 
         if (fillSize > 0) {
             fillColBottom((u32*)chunk->blocks, localCol, fillSize + 1, grass.data, 0);
+            fillColBottom((u32*)chunk->blocks, localCol, fillSize, dirt.data, -1);
+        } else {
+            fillColBottom((u32*)chunk->blocks, localCol, fillSize, dirt.data, 0);
         }
-        fillColBottom((u32*)chunk->blocks, localCol, fillSize, dirt.data, -1);
-
     }
 }
 
@@ -399,6 +400,17 @@ void updateChunks(ChunkMap *map, i32 x, i32 y, i32 renderDistChunks) {
                                       (Color) {.r = 124, .g = 189, .b = 107, .a = 255});
                         break;
                 }
+            }
+
+            // debug overlay
+            if (IsKeyDown(KEY_GRAVE)) {
+                i32 worldX = (i * CHUNK_SIZE * BLOCK_SIZE);
+                i32 projX = worldX - x;
+
+                i32 worldY = (j * CHUNK_SIZE * BLOCK_SIZE);
+                i32 projY = worldY - y;
+                DrawRectangleLines(projX, projY, CHUNK_SIZE * BLOCK_SIZE, CHUNK_SIZE * BLOCK_SIZE, 
+                              (Color){.r = 255, .g = 0, .b = 0, .a = 255});
             }
         }
     }
