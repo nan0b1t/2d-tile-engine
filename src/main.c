@@ -429,7 +429,8 @@ void generateChunk(i32 x, i32 y, Chunk *chunk, ChunkMap *map) {
 
             if (chunk->blocks[j * CHUNK_SIZE + i].data != 0) {
                 printf("attemping noise..\n");
-                if (noise_2d((double)projX * 0.05, (double)projY * 0.05, SEED) < -0.2) {
+                double noise = fabs(noise_2d((double)projX * 0.05, (double)projY * 0.05, SEED));
+                if (noise < 0.2 && noise > -0.2) {
                     printf("noise sucess..\n");
                     chunk->blocks[j * CHUNK_SIZE + i].data = 0;
                 }
