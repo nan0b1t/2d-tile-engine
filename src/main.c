@@ -307,8 +307,7 @@ double noise(double i, i32 seed) {
 
 
 void fillColBottom(u32 *chunk, int col,
-                   i32 fillSize, u32 fillVal, u32 fillValTop, i32 emptyVal,
-                   i32 x, i32 y
+                   i32 fillSize, u32 fillVal, i32 emptyVal
 ) {
     if (col < 0 || col >= CHUNK_SIZE) return;
 
@@ -319,18 +318,8 @@ void fillColBottom(u32 *chunk, int col,
 
         int stepsFromBottom = (CHUNK_SIZE - 1) - row;
 
-        i32 worldX = x * CHUNK_SIZE;
-        i32 worldY = y * CHUNK_SIZE;
-        i32 localCol = row;
-        i32 globalCol = worldX + localCol;
-        i32 colVal = (noise(globalCol * 0.004, SEED) + 0.5) * BASE_HEIGHT;
-
         if (stepsFromBottom < fillSize) {
-            if (worldY + row == colVal) {
-                chunk[flatIndex] = fillValTop;
-            } else {
             chunk[flatIndex] = fillVal;
-            }
         } else if (emptyVal != -1){
             chunk[flatIndex] = emptyVal;
         }
@@ -363,7 +352,29 @@ void generateChunk(i32 x, i32 y, Chunk *chunk, ChunkMap *map) {
         grass.data = 0;
         grass.bits.foreground = 2;
 
-        fillColBottom((u32*)chunk->blocks, localCol, fillSize, dirt.data, grass.data, 0, x, y);
+        Tile stone;
+        stone.data = 0;
+        stone.bits.foreground = 3;
+
+        // fillColBottom((u32*)chunk->blocks, localCol, fillSize, dirt.data, 0);
+        i32 grassStart = colVal;
+        i32 dirtStart  = grassStart - 1;
+        i32 stoneStart = dirtStart - 10;
+
+        for (int j = 0; j < CHUNK_SIZE; j++) {
+            i32 projX = globalCol;
+            i32 projY = worldY + j;
+
+            if (projY > grassStart) {
+                chunk->blocks[j * CHUNK_SIZE + i].data = 0;
+            } else if (projY > dirtStart) {
+                chunk->blocks[j * CHUNK_SIZE + i].data = grass.data;
+            } else if (projY > stoneStart) {
+                chunk->blocks[j * CHUNK_SIZE + i].data = dirt.data;
+            } else {
+                chunk->blocks[j * CHUNK_SIZE + i].data = stone.data;
+            }
+        }
     }
 }
 
