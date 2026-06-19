@@ -305,6 +305,58 @@ double noise(double i, i32 seed) {
     return lowerPull + magicFade(lowerDist) * (higherPull - lowerPull);
 }
 
+void hash_2d(int32_t x, int32_t y, int32_t seed, double* out_gx, double* out_gy) {
+    uint32_t state = (uint32_t)x * 0x1F1C1F1CU + (uint32_t)y * 0x3A3A3A3AU + ((uint32_t)seed * 0x9E3779B9U);
+
+    state ^= state >> 16;
+    state *= 0x7FEB352DU;
+    state ^= state >> 15;
+    state *= 0x846CA68BU;
+    state ^= state >> 16;
+
+    switch (state & 3) {
+        case 0: *out_gx =  1.0; *out_gy =  1.0; break;
+        case 1: *out_gx = -1.0; *out_gy =  1.0; break;
+        case 2: *out_gx =  1.0; *out_gy = -1.0; break;
+        case 3: *out_gx = -1.0; *out_gy = -1.0; break;
+    }
+}
+
+double lerp(double t, double a, double b) {
+    return a + t * (b - a);
+}
+
+
+double noise_2d(double x, double y, int32_t seed) {
+    int32_t x0 = (int32_t)floor(x);
+    int32_t x1 = x0 + 1;
+    int32_t y0 = (int32_t)floor(y);
+    int32_t y1 = y0 + 1;
+
+    double xf0 = x - (double)x0; double yf0 = y - (double)y0;
+    double xf1 = x - (double)x1; double yf1 = y - (double)y0;
+    double xf2 = x - (double)x0; double yf2 = y - (double)y1;
+    double xf3 = x - (double)x1; double yf3 = y - (double)y1;
+
+    double g0x, g0y, g1x, g1y, g2x, g2y, g3x, g3y;
+    hash_2d(x0, y0, seed, &g0x, &g0y);
+    hash_2d(x1, y0, seed, &g1x, &g1y);
+    hash_2d(x0, y1, seed, &g2x, &g2y);
+    hash_2d(x1, y1, seed, &g3x, &g3y);
+
+    double pull0 = (xf0 * g0x) + (yf0 * g0y);
+    double pull1 = (xf1 * g1x) + (yf1 * g1y);
+    double pull2 = (xf2 * g2x) + (yf2 * g2y);
+    double pull3 = (xf3 * g3x) + (yf3 * g3y);
+
+    double u = magicFade(xf0);
+    double v = magicFade(yf0);
+
+    double topBlend    = lerp(u, pull0, pull1);
+    double bottomBlend = lerp(u, pull2, pull3);
+
+    return lerp(v, topBlend, bottomBlend);
+}
 
 void fillColBottom(u32 *chunk, int col,
                    i32 fillSize, u32 fillVal, i32 emptyVal
@@ -358,21 +410,29 @@ void generateChunk(i32 x, i32 y, Chunk *chunk, ChunkMap *map) {
 
         // fillColBottom((u32*)chunk->blocks, localCol, fillSize, dirt.data, 0);
         i32 grassStart = colVal;
-        i32 dirtStart  = grassStart - 1;
-        i32 stoneStart = dirtStart - 10;
+        i32 dirtStart  = grassStart + 2;
+        i32 stoneStart = dirtStart + 10;
 
         for (int j = 0; j < CHUNK_SIZE; j++) {
             i32 projX = globalCol;
             i32 projY = worldY + j;
 
-            if (projY > grassStart) {
+            if (projY < grassStart) {
                 chunk->blocks[j * CHUNK_SIZE + i].data = 0;
-            } else if (projY > dirtStart) {
+            } else if (projY < dirtStart) {
                 chunk->blocks[j * CHUNK_SIZE + i].data = grass.data;
-            } else if (projY > stoneStart) {
+            } else if (projY < stoneStart) {
                 chunk->blocks[j * CHUNK_SIZE + i].data = dirt.data;
             } else {
                 chunk->blocks[j * CHUNK_SIZE + i].data = stone.data;
+            }
+
+            if (chunk->blocks[j * CHUNK_SIZE + i].data != 0) {
+                printf("attemping noise..\n");
+                if (noise_2d((double)projX * 0.05, (double)projY * 0.05, SEED) < -0.2) {
+                    printf("noise sucess..\n");
+                    chunk->blocks[j * CHUNK_SIZE + i].data = 0;
+                }
             }
         }
     }
@@ -423,6 +483,12 @@ void updateChunks(ChunkMap *map, i32 x, i32 y, i32 renderDistChunks) {
                         DrawRectangle(drawX, drawY,
                                       BLOCK_SIZE, BLOCK_SIZE,
                                       (Color) {.r = 124, .g = 189, .b = 107, .a = 255});
+                        break;
+
+                    case 3:
+                        DrawRectangle(drawX, drawY,
+                                      BLOCK_SIZE, BLOCK_SIZE,
+                                      (Color) {.r = 149, .g = 150, .b = 149, .a = 255});
                         break;
                 }
             }
@@ -482,6 +548,7 @@ int initGame(Game *game) {
     }
 
     InitWindow(800, 600, "random block game idk bro");
+    SetConfigFlags(FLAG_FULLSCREEN_MODE);
     return 0;
 }
 
