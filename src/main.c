@@ -7,7 +7,7 @@
 #include <stdio.h>
 
 #define BASE_HEIGHT 200
-#define BLOCK_SIZE 2
+#define BLOCK_SIZE 4
 #define CLAMP(val, min, max)                                                   \
     ((val) < (min) ? (min) : ((val) > (max) ? (max) : (val)))
 
@@ -344,7 +344,9 @@ void generateChunk(i32 x, i32 y, Chunk *chunk) {
         grass.data = 0;
         grass.bits.foreground = 2;
 
-        fillColBottom((u32*)chunk->blocks, localCol, fillSize + 1, grass.data, 0);
+        if (fillSize > 0) {
+            fillColBottom((u32*)chunk->blocks, localCol, fillSize + 1, grass.data, 0);
+        }
         fillColBottom((u32*)chunk->blocks, localCol, fillSize, dirt.data, -1);
 
     }
