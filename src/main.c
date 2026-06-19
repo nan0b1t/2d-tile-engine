@@ -321,9 +321,11 @@ double noise(double i, i32 seed) {
     return lowerPull + magicFade(lowerDist) * (higherPull - lowerPull);
 }
 
-void generateChunk(i32 x, i32 y, Chunk *chunk) {
+void generateChunk(i32 x, i32 y, Chunk *chunk, ChunkMap *map) {
     i32 worldX = x * CHUNK_SIZE;
     i32 worldY = y * CHUNK_SIZE;
+
+    bool needsUp = false;
 
     for (int i = 0; i < CHUNK_SIZE; i++) {
         i32 localCol = i;
@@ -345,11 +347,20 @@ void generateChunk(i32 x, i32 y, Chunk *chunk) {
         grass.bits.foreground = 2;
 
         if (fillSize > 0)  {
-            fillColBottom((u32*)chunk->blocks, localCol, fillSize + 1, grass.data, 0);
+            if (fillSize >= CHUNK_SIZE) {
+                needsUp = true;
+            } else {
+                fillColBottom((u32*)chunk->blocks, localCol, fillSize + 1, grass.data, 0);
+            }
             fillColBottom((u32*)chunk->blocks, localCol, fillSize, dirt.data, -1);
         } else {
             fillColBottom((u32*)chunk->blocks, localCol, fillSize, dirt.data, 0);
         }
+    }
+
+    if (needsUp) {
+        Chunk *upChunk = touchChunk(map, x, y - 1).chunk;
+        generateChunk(x, y - 1, upChunk, map);
     }
 }
 
@@ -369,7 +380,7 @@ void updateChunks(ChunkMap *map, i32 x, i32 y, i32 renderDistChunks) {
             Chunk *chunk = getChunkMut(map, i, j);
             if (chunk == NULL) {
                 chunk = touchChunk(map, i, j).chunk;
-                generateChunk(i, j, chunk);
+                generateChunk(i, j, chunk, map);
             }
 
             if (chunk == NULL) {
