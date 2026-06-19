@@ -344,7 +344,7 @@ void generateChunk(i32 x, i32 y, Chunk *chunk) {
         grass.data = 0;
         grass.bits.foreground = 2;
 
-        if (fillSize > 0) {
+        if (fillSize > 0)  {
             fillColBottom((u32*)chunk->blocks, localCol, fillSize + 1, grass.data, 0);
             fillColBottom((u32*)chunk->blocks, localCol, fillSize, dirt.data, -1);
         } else {
@@ -403,7 +403,7 @@ void updateChunks(ChunkMap *map, i32 x, i32 y, i32 renderDistChunks) {
             }
 
             // debug overlay
-            if (IsKeyDown(KEY_GRAVE)) {
+            if (IsKeyDown(KEY_GRAVE)) { // why the frick is it called grave?
                 i32 worldX = (i * CHUNK_SIZE * BLOCK_SIZE);
                 i32 projX = worldX - x;
 
@@ -415,7 +415,6 @@ void updateChunks(ChunkMap *map, i32 x, i32 y, i32 renderDistChunks) {
         }
     }
 }
-
 
 ChunkMap *getWorld() {
     ChunkMap *result = calloc(1, sizeof(ChunkMap));
@@ -468,17 +467,18 @@ int updateGame(Game *game) {
 
 
     if (IsKeyDown(KEY_A))
-        game->camera.x -= 5;
+        game->camera.x -= 15;
     if (IsKeyDown(KEY_D))
-        game->camera.x += 5;
+        game->camera.x += 15;
     if (IsKeyDown(KEY_W))
-        game->camera.y -= 5;
+        game->camera.y -= 15;
     if (IsKeyDown(KEY_S))
-        game->camera.y += 5;
+        game->camera.y += 15;
 
     BeginDrawing();
     ClearBackground(RAYWHITE);
     updateChunks(game->chunkMap, game->camera.x, game->camera.y, 8);
+    DrawFPS(5, 5);
     EndDrawing();
     frame++;
     return 1;
