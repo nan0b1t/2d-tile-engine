@@ -8,8 +8,11 @@
 
 #define BASE_HEIGHT 200
 #define BLOCK_SIZE 6
+
 #define CLAMP(val, min, max)                                                   \
     ((val) < (min) ? (min) : ((val) > (max) ? (max) : (val)))
+#define MAX(a, b) (((a) > (b)) ? (a) : (b))
+#define MIN(a, b) (((a) < (b)) ? (a) : (b))
 
 #define CHUNK_SIZE 32
 #define TABLE_SIZE 2048
@@ -428,10 +431,9 @@ void generateChunk(i32 x, i32 y, Chunk *chunk, ChunkMap *map) {
             }
 
             if (chunk->blocks[j * CHUNK_SIZE + i].data != 0) {
-                printf("attemping noise..\n");
                 double noise = fabs(noise_2d((double)projX * 0.05, (double)projY * 0.05, SEED));
-                if (noise < 0.2 && noise > -0.2) {
-                    printf("noise sucess..\n");
+                double threshold = MIN(MAX(((double)projY / 400) * 0.15, 0.05), 0.15);
+                if (noise < threshold && noise > -threshold) {
                     chunk->blocks[j * CHUNK_SIZE + i].data = 0;
                 }
             }
