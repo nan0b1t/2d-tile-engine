@@ -364,6 +364,12 @@ double noise_2d(double x, double y, int32_t seed) {
     return lerp(v, topBlend, bottomBlend);
 }
 
+Tile *getTile(i32 x, i32 y, ChunkMap *map) {
+    return &touchChunk(map, x / CHUNK_SIZE, y / CHUNK_SIZE).chunk->blocks[
+        ((y % CHUNK_SIZE) * CHUNK_SIZE + (x % CHUNK_SIZE))
+    ];
+}
+
 void fillColBottom(u32 *chunk, int col,
                    i32 fillSize, u32 fillVal, i32 emptyVal
 ) {
@@ -569,14 +575,39 @@ ChunkMap *getWorld() {
     return result;
 }
 
+typedef struct {
+    float min[2]; // [0] = X, [1] = Y
+    float max[2]; // [0] = X, [1] = Y
+} Hitbox;
+
+inline bool hitboxIsTouching(const Hitbox* const restrict a, const Hitbox* const restrict b) {
+    return (a->min[0] <= b->max[0]) & (a->max[0] >= b->min[0]) &
+           (a->min[1] <= b->max[1]) & (a->max[1] >= b->min[1]);
+}
+
 typedef struct Player {
     float velX;
     float velY;
     float x;
     float y;
+    int wx;
+    int wy;
+    Hitbox hb;
 } Player;
 
-void updatePlayer(Player *p, float dt, Camera *cam) {
+void updatePlayer(Player *p, float dt, Camera *cam, ChunkMap *map) {
+    #define RECALCULATE_BOUNDS do { \
+        topLeft  = getTile(p->wx,     p->wy,     map); \
+        topRight = getTile(p->wx + 1, p->wy,     map); \
+        botLeft  = getTile(p->wx,     p->wy + 2, map); \
+        botRight = getTile(p->wx + 1, p->wy + 2, map); \
+    } while (0)
+
+    Tile *topLeft, *topRight, *botLeft, *botRight;
+
+    p->wx = p->x / BLOCK_SIZE;
+    p->wy = p->y / BLOCK_SIZE;
+
     float mv = PLAYER_SPEED * dt;
     if (IsKeyDown(KEY_A)) p->velX -= mv;
     if (IsKeyDown(KEY_D)) p->velX += mv;
@@ -586,11 +617,25 @@ void updatePlayer(Player *p, float dt, Camera *cam) {
     p->velY += PLAYER_GRAVITY * dt;
 
     p->x += p->velX;
+    RECALCULATE_BOUNDS;
+    if (topLeft->bits.foreground != 0 || topRight->bits.foreground != 0 ||
+        botLeft->bits.foreground != 0 || botRight->bits.foreground != 0) {
+        p->velX = 0;
+        p->x = (p->wx + 1) * BLOCK_SIZE;
+    }
+
     p->y += p->velY;
+    RECALCULATE_BOUNDS;
+    if (topLeft->bits.foreground != 0 || topRight->bits.foreground != 0 ||
+        botLeft->bits.foreground != 0 || botRight->bits.foreground != 0) {
+        p->velY = 0;
+        p->y = (p->wy) * BLOCK_SIZE;
+    }
 
     cam->x = p->x;
     cam->y = p->y;
 }
+
 void drawPlayer(Player *p, Camera *cam) {
     int x = p->x - cam->x + GetScreenWidth()  / 2;
     int y = p->y - cam->y + GetScreenHeight() / 2;
@@ -653,7 +698,7 @@ int updateGame(Game *game) {
     BeginDrawing();
     ClearBackground(SKYBLUE);
     updateChunks(game->chunkMap, game->camera.x, game->camera.y, 8);
-    updatePlayer(&game->player, dt, &game->camera);
+    updatePlayer(&game->player, dt, &game->camera, game->chunkMap);
     drawPlayer(&game->player, &game->camera);
     DrawFPS(5, 5);
     EndDrawing();
