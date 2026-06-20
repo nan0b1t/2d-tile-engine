@@ -7,7 +7,7 @@
 #include <stdio.h>
 
 #define BASE_HEIGHT 200
-#define BLOCK_SIZE 6
+#define BLOCK_SIZE 16
 
 #define CLAMP(val, min, max)                                                   \
     ((val) < (min) ? (min) : ((val) > (max) ? (max) : (val)))
@@ -20,6 +20,9 @@
 #define SEED 67
 
 #define CHUNK_MNGR_ACTIVE_CHUNKS_SIZE 16
+
+#define PLAYER_SPEED 15
+#define PLAYER_GRAVITY 5
 
 #if defined(_MSC_VER)
 /* MSVC Style */
@@ -566,10 +569,39 @@ ChunkMap *getWorld() {
     return result;
 }
 
+typedef struct Player {
+    float velX;
+    float velY;
+    float x;
+    float y;
+} Player;
+
+void updatePlayer(Player *p, float dt, Camera *cam) {
+    float mv = PLAYER_SPEED * dt;
+    if (IsKeyDown(KEY_A)) p->velX -= mv;
+    if (IsKeyDown(KEY_D)) p->velX += mv;
+    if (IsKeyDown(KEY_W)) p->velY -= mv;
+    if (IsKeyDown(KEY_S)) p->velY += mv;
+
+    p->velY += PLAYER_GRAVITY * dt;
+
+    p->x += p->velX;
+    p->y += p->velY;
+
+    cam->x = p->x;
+    cam->y = p->y;
+}
+void drawPlayer(Player *p, Camera *cam) {
+    int x = p->x - cam->x + GetScreenWidth()  / 2;
+    int y = p->y - cam->y + GetScreenHeight() / 2;
+    DrawRectangle(x, y, BLOCK_SIZE, BLOCK_SIZE * 2, BLUE);
+}
+
 typedef struct Game {
     // World world;
     Camera camera;
     ChunkMap *chunkMap;
+    Player player;
     int (*init)(struct Game *game);
     int (*update)(struct Game *game);
     int (*end)(struct Game *game);
@@ -606,19 +638,23 @@ int updateGame(Game *game) {
         return 0;
     }
 
+    float dt = GetFrameTime();
 
-    if (IsKeyDown(KEY_A))
-        game->camera.x -= 15;
-    if (IsKeyDown(KEY_D))
-        game->camera.x += 15;
-    if (IsKeyDown(KEY_W))
-        game->camera.y -= 15;
-    if (IsKeyDown(KEY_S))
-        game->camera.y += 15;
+
+    // if (IsKeyDown(KEY_A))
+    //     game->camera.x -= 15;
+    // if (IsKeyDown(KEY_D))
+    //     game->camera.x += 15;
+    // if (IsKeyDown(KEY_W))
+    //     game->camera.y -= 15;
+    // if (IsKeyDown(KEY_S))
+    //     game->camera.y += 15;
 
     BeginDrawing();
     ClearBackground(SKYBLUE);
     updateChunks(game->chunkMap, game->camera.x, game->camera.y, 8);
+    updatePlayer(&game->player, dt, &game->camera);
+    drawPlayer(&game->player, &game->camera);
     DrawFPS(5, 5);
     EndDrawing();
     frame++;
