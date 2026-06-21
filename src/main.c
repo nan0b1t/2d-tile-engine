@@ -23,17 +23,26 @@
 
 #define PLAYER_SPEED 15
 #define PLAYER_GRAVITY 5
+#define PLAYER_FRICTION 5
+#define PLAYER_MAX_SPEED 15
+
+#define PLAYER_WIDTH  BLOCK_SIZE
+#define PLAYER_HEIGHT BLOCK_SIZE * 2
+#define PLAYER_HB_OFFSET_Y 0
+#define PLAYER_HB_OFFSET_X 0
+
+#define EPSILON 0.001f
 
 #if defined(_MSC_VER)
-/* MSVC Style */
-#define PACK_START __pragma(pack(push, 1))
-#define PACK_END __pragma(pack(pop))
-#define PACK_ATTR
+    /* MSVC Style */
+    #define PACK_START __pragma(pack(push, 1))
+    #define PACK_END __pragma(pack(pop))
+    #define PACK_ATTR
 #elif defined(__GNUC__) || defined(__clang__)
-/* GCC and Clang Style */
-#define PACK_START
-#define PACK_END
-#define PACK_ATTR __attribute__((packed))
+    /* GCC and Clang Style */
+    #define PACK_START
+    #define PACK_END
+    #define PACK_ATTR __attribute__((packed))
 #endif
 
 int frame = 0;
@@ -365,9 +374,13 @@ double noise_2d(double x, double y, int32_t seed) {
 }
 
 Tile *getTile(i32 x, i32 y, ChunkMap *map) {
-    return &touchChunk(map, x / CHUNK_SIZE, y / CHUNK_SIZE).chunk->blocks[
-        ((y % CHUNK_SIZE) * CHUNK_SIZE + (x % CHUNK_SIZE))
-    ];
+    i32 cx = x >> 4; 
+    i32 cy = y >> 4;
+
+    i32 localX = x & 15; 
+    i32 localY = y & 15;
+
+    return &touchChunk(map, cx, cy).chunk->blocks[(localY * 16) + localX];
 }
 
 void fillColBottom(u32 *chunk, int col,
@@ -498,6 +511,7 @@ void updateChunks(ChunkMap *map, i32 x, i32 y, i32 renderDistChunks) {
 
                 bool drewFG = false;
                 switch (chunk->blocks[b].bits.foreground) {
+                    case 0: break; /* empty */
                     case 1: ;
                         DrawRectangle(drawX, drawY,
                                       BLOCK_SIZE, BLOCK_SIZE,
@@ -526,6 +540,10 @@ void updateChunks(ChunkMap *map, i32 x, i32 y, i32 renderDistChunks) {
                         drewFG = true;
                         break;
 
+                    default:
+                        DrawRectangle(drawX, drawY, BLOCK_SIZE, BLOCK_SIZE, MAGENTA);
+                        /* used for invalid blocks */
+                        break;
                 }
 
                 if (!drewFG) {
@@ -576,70 +594,132 @@ ChunkMap *getWorld() {
 }
 
 typedef struct {
-    float min[2]; // [0] = X, [1] = Y
-    float max[2]; // [0] = X, [1] = Y
+    i32 x; /* offset */
+    i32 y; /* offset */
+    i32 w;
+    i32 h;
 } Hitbox;
-
-inline bool hitboxIsTouching(const Hitbox* const restrict a, const Hitbox* const restrict b) {
-    return (a->min[0] <= b->max[0]) & (a->max[0] >= b->min[0]) &
-           (a->min[1] <= b->max[1]) & (a->max[1] >= b->min[1]);
-}
 
 typedef struct Player {
     float velX;
     float velY;
     float x;
     float y;
-    int wx;
-    int wy;
     Hitbox hb;
 } Player;
 
 void updatePlayer(Player *p, float dt, Camera *cam, ChunkMap *map) {
-    #define RECALCULATE_BOUNDS do { \
-        topLeft  = getTile(p->wx,     p->wy,     map); \
-        topRight = getTile(p->wx + 1, p->wy,     map); \
-        botLeft  = getTile(p->wx,     p->wy + 2, map); \
-        botRight = getTile(p->wx + 1, p->wy + 2, map); \
-    } while (0)
-
-    Tile *topLeft, *topRight, *botLeft, *botRight;
-
-    p->wx = p->x / BLOCK_SIZE;
-    p->wy = p->y / BLOCK_SIZE;
-
     float mv = PLAYER_SPEED * dt;
+
     if (IsKeyDown(KEY_A)) p->velX -= mv;
     if (IsKeyDown(KEY_D)) p->velX += mv;
     if (IsKeyDown(KEY_W)) p->velY -= mv;
     if (IsKeyDown(KEY_S)) p->velY += mv;
 
+    /* apply gravity */
     p->velY += PLAYER_GRAVITY * dt;
 
-    p->x += p->velX;
-    RECALCULATE_BOUNDS;
-    if (topLeft->bits.foreground != 0 || topRight->bits.foreground != 0 ||
-        botLeft->bits.foreground != 0 || botRight->bits.foreground != 0) {
-        p->velX = 0;
-        p->x = (p->wx + 1) * BLOCK_SIZE;
+    /* apply friction */
+    if (p->velX > 0) {
+        p->velX -= PLAYER_FRICTION * dt;
+        if (p->velX < 0) p->velX = 0;
+    }
+    if (p->velX < 0) {
+        p->velX += PLAYER_FRICTION * dt;
+        if (p->velX > 0) p->velX = 0;
     }
 
-    p->y += p->velY;
-    RECALCULATE_BOUNDS;
-    if (topLeft->bits.foreground != 0 || topRight->bits.foreground != 0 ||
-        botLeft->bits.foreground != 0 || botRight->bits.foreground != 0) {
-        p->velY = 0;
-        p->y = (p->wy) * BLOCK_SIZE;
+    /* constrain speed*/
+    if (p->velX >  PLAYER_MAX_SPEED) p->velX =  PLAYER_MAX_SPEED;
+    if (p->velX < -PLAYER_MAX_SPEED) p->velX = -PLAYER_MAX_SPEED;
+
+    /* construct hitbox */
+    p->hb.x = PLAYER_HB_OFFSET_X;
+    p->hb.y = PLAYER_HB_OFFSET_Y;
+
+    p->hb.w = PLAYER_WIDTH;
+    p->hb.h = PLAYER_HEIGHT;
+
+    float left, right, top, bottom;
+    int minX, maxX, minY, maxY;
+
+    #define CALC_BOUNDS do { \
+        left = p->x + p->hb.x; \
+        right  = p->x + p->hb.x + p->hb.w - EPSILON; \
+        top    = p->y + p->hb.y; \
+        bottom = p->y + p->hb.y + p->hb.h - EPSILON; \
+        \
+        minX = (int)floor(left / BLOCK_SIZE); \
+        maxX = (int)floor(right / BLOCK_SIZE); \
+        minY = (int)floor(top / BLOCK_SIZE); \
+        maxY = (int)floor(bottom / BLOCK_SIZE); \
+    } while (0)
+
+    /* X MOVEMENT */
+    p->x += p->velX;
+
+    CALC_BOUNDS;
+
+    for (int y = minY; y <= maxY; y++) {
+        for (int x = minX; x <= maxX; x++) {
+            Tile *t = getTile(x, y, map);
+
+            if (t != NULL && t->bits.foreground != 0) {
+                printf("X hit\n");
+                if (p->velX > 0) { /* Moving Right */
+                        p->x = x * BLOCK_SIZE - p->hb.w - p->hb.x - EPSILON;
+                } else if (p->velX < 0) { /* Moving Left */
+                        p->x = (x + 1) * BLOCK_SIZE - p->hb.x;
+                }
+                int screenX = (x * BLOCK_SIZE) - (int)cam->x + (GetScreenWidth() / 2);
+                int screenY = (y * BLOCK_SIZE) - (int)cam->y + (GetScreenHeight() / 2);
+
+                DrawRectangle(screenX, screenY, BLOCK_SIZE, BLOCK_SIZE, (Color){ 255, 0, 0, 100 });
+                p->velX = 0;
+                goto endx;
+            }
+        }
     }
+    endx:
+
+    /* Y MOVEMENT */
+    p->y += p->velY;
+
+    CALC_BOUNDS;
+
+    for (int y = minY; y <= maxY; y++) {
+        for (int x = minX; x <= maxX; x++) {
+            Tile *t = getTile(x, y, map);
+
+            if (t != NULL && t->bits.foreground != 0) {
+                printf("Y hit\n");
+                if (p->velY > 0) { // moving down
+                    p->y = y * BLOCK_SIZE - p->hb.h - p->hb.y - EPSILON;
+                } else if (p->velY < 0) { // moving up
+                    p->y = (y + 1) * BLOCK_SIZE - p->hb.y;
+                }
+                p->velY = 0;
+
+                int screenX = (x * BLOCK_SIZE) - (int)cam->x + (GetScreenWidth() / 2);
+                int screenY = (y * BLOCK_SIZE) - (int)cam->y + (GetScreenHeight() / 2);
+
+                DrawRectangle(screenX, screenY, BLOCK_SIZE, BLOCK_SIZE, (Color){ 255, 0, 0, 100 });
+                goto endy;
+            }
+        }
+    }
+    endy:
 
     cam->x = p->x;
     cam->y = p->y;
 }
 
 void drawPlayer(Player *p, Camera *cam) {
-    int x = p->x - cam->x + GetScreenWidth()  / 2;
-    int y = p->y - cam->y + GetScreenHeight() / 2;
-    DrawRectangle(x, y, BLOCK_SIZE, BLOCK_SIZE * 2, BLUE);
+    int x = (int)(p->x + p->hb.x) - cam->x + GetScreenWidth()  / 2;
+    int y = (int)(p->y + p->hb.y) - cam->y + GetScreenHeight() / 2;
+
+
+    DrawRectangle(x, y, p->hb.w, p->hb.h, BLUE);
 }
 
 typedef struct Game {
