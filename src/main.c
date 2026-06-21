@@ -21,12 +21,12 @@
 
 #define CHUNK_MNGR_ACTIVE_CHUNKS_SIZE 16
 
-#define PLAYER_SPEED 15
-#define PLAYER_GRAVITY 5
-#define PLAYER_FRICTION 5
-#define PLAYER_MAX_SPEED 15
+#define PLAYER_SPEED 500
+#define PLAYER_GRAVITY 50
+#define PLAYER_FRICTION 50
+#define PLAYER_MAX_SPEED 500
 
-#define PLAYER_WIDTH  BLOCK_SIZE
+#define PLAYER_WIDTH  BLOCK_SIZE - 2
 #define PLAYER_HEIGHT BLOCK_SIZE * 2
 #define PLAYER_HB_OFFSET_Y 0
 #define PLAYER_HB_OFFSET_X 0
@@ -78,6 +78,7 @@ typedef struct Chunk {
 PACK_START typedef struct TableMeta {
     i32 x, y;
     u8 state;
+    bool generated;
 } PACK_ATTR TableMeta;
 
 PACK_END typedef struct ChunkMap {
@@ -238,10 +239,10 @@ void collectGarbage(ChunkMap *chunkMap, i32 playerX, i32 playerY, i32 renderDist
 
     for (i32 i = 0; i < TABLE_SIZE; i++) {
         if (chunkMap->meta[i].state == SLOT_FULL &&
-           (chunkMap->meta[i].x <= playerChunk.x - renderDistChunks ||
-            chunkMap->meta[i].x >= playerChunk.x + renderDistChunks ||
-            chunkMap->meta[i].y <= playerChunk.y - renderDistChunks ||
-            chunkMap->meta[i].y >= playerChunk.y + renderDistChunks) 
+           (chunkMap->meta[i].x < playerChunk.x - renderDistChunks ||
+            chunkMap->meta[i].x > playerChunk.x + renderDistChunks ||
+            chunkMap->meta[i].y < playerChunk.y - renderDistChunks ||
+            chunkMap->meta[i].y > playerChunk.y + renderDistChunks) 
         ) {
             chunkMap->meta[i].state = TOMBSTONE;
         }
@@ -373,14 +374,24 @@ double noise_2d(double x, double y, int32_t seed) {
     return lerp(v, topBlend, bottomBlend);
 }
 
+
+void generateChunk(i32 x, i32 y, Chunk *chunk, ChunkMap *map, TableMeta *meta);
 Tile *getTile(i32 x, i32 y, ChunkMap *map) {
-    i32 cx = x >> 4; 
-    i32 cy = y >> 4;
 
-    i32 localX = x & 15; 
-    i32 localY = y & 15;
+    i32 cx = x >> 5; 
+    i32 cy = y >> 5;
 
-    return &touchChunk(map, cx, cy).chunk->blocks[(localY * 16) + localX];
+    i32 localX = x & 31; 
+    i32 localY = y & 31;
+
+    ChunkPair pair = touchChunk(map, cx, cy);
+    if (pair.chunk == NULL) {
+        return NULL; // table full
+    }
+    if (pair.meta->state == SLOT_FULL && !pair.meta->generated) {
+        generateChunk(cx, cy, pair.chunk, map, pair.meta);
+    }
+    return &pair.chunk->blocks[(localY * 32) + localX];
 }
 
 void fillColBottom(u32 *chunk, int col,
@@ -404,9 +415,11 @@ void fillColBottom(u32 *chunk, int col,
 }
 
 
-void generateChunk(i32 x, i32 y, Chunk *chunk, ChunkMap *map) {
+void generateChunk(i32 x, i32 y, Chunk *chunk, ChunkMap *map, TableMeta *meta) {
     i32 worldX = x * CHUNK_SIZE;
     i32 worldY = y * CHUNK_SIZE;
+
+    // printf("generateChunk chunk(%d,%d) worldBlock=(%d,%d)\n", x, y, worldX, worldY);
 
     bool needsUp = false;
 
@@ -473,6 +486,7 @@ void generateChunk(i32 x, i32 y, Chunk *chunk, ChunkMap *map) {
             }
         }
     }
+    meta->generated = true;
 }
 
 typedef struct chunkManager {
@@ -489,9 +503,13 @@ void updateChunks(ChunkMap *map, i32 x, i32 y, i32 renderDistChunks) {
     for (int i = centerChunkX - renderDistChunks; i < centerChunkX + renderDistChunks; i++) {
         for (int j = centerChunkY - renderDistChunks; j < centerChunkY + renderDistChunks; j++) {
             Chunk *chunk = getChunkMut(map, i, j);
+            TableMeta *meta;
             if (chunk == NULL) {
-                chunk = touchChunk(map, i, j).chunk;
-                generateChunk(i, j, chunk, map);
+                ChunkPair pair = touchChunk(map, i, j);
+                chunk = pair.chunk;
+                meta = pair.meta;
+
+                generateChunk(i, j, chunk, map, meta);
             }
 
             if (chunk == NULL) {
@@ -505,8 +523,8 @@ void updateChunks(ChunkMap *map, i32 x, i32 y, i32 renderDistChunks) {
                 int worldPixelX = (i * CHUNK_SIZE + localBlockX) * BLOCK_SIZE;
                 int worldPixelY = (j * CHUNK_SIZE + localBlockY) * BLOCK_SIZE;
 
-                int drawX = worldPixelX - x;
-                int drawY = worldPixelY - y;
+                int drawX = worldPixelX - x + GetScreenWidth() / 2;
+                int drawY = worldPixelY - y + GetScreenHeight() / 2;
 
 
                 bool drewFG = false;
@@ -570,7 +588,7 @@ void updateChunks(ChunkMap *map, i32 x, i32 y, i32 renderDistChunks) {
             }
 
             // debug overlay
-            if (IsKeyDown(KEY_GRAVE)) { // why the frick is it called grave?
+            if (IsKeyDown(KEY_GRAVE)) {
                 i32 worldX = (i * CHUNK_SIZE * BLOCK_SIZE);
                 i32 projX = worldX - x;
 
@@ -656,18 +674,19 @@ void updatePlayer(Player *p, float dt, Camera *cam, ChunkMap *map) {
     } while (0)
 
     /* X MOVEMENT */
-    p->x += p->velX;
+    p->x += p->velX * dt;
 
     CALC_BOUNDS;
+    // printf("player feet world px=(%.1f,%.1f) blockcoord=(%d..%d, %d..%d)\n",
+            // p->x, bottom, minX, maxX, minY, maxY);
 
     for (int y = minY; y <= maxY; y++) {
         for (int x = minX; x <= maxX; x++) {
             Tile *t = getTile(x, y, map);
 
             if (t != NULL && t->bits.foreground != 0) {
-                printf("X hit\n");
                 if (p->velX > 0) { /* Moving Right */
-                        p->x = x * BLOCK_SIZE - p->hb.w - p->hb.x - EPSILON;
+                        p->x = x * BLOCK_SIZE - p->hb.w - p->hb.x /* - EPSILON */;
                 } else if (p->velX < 0) { /* Moving Left */
                         p->x = (x + 1) * BLOCK_SIZE - p->hb.x;
                 }
@@ -683,7 +702,7 @@ void updatePlayer(Player *p, float dt, Camera *cam, ChunkMap *map) {
     endx:
 
     /* Y MOVEMENT */
-    p->y += p->velY;
+    p->y += p->velY * dt;
 
     CALC_BOUNDS;
 
@@ -692,9 +711,8 @@ void updatePlayer(Player *p, float dt, Camera *cam, ChunkMap *map) {
             Tile *t = getTile(x, y, map);
 
             if (t != NULL && t->bits.foreground != 0) {
-                printf("Y hit\n");
                 if (p->velY > 0) { // moving down
-                    p->y = y * BLOCK_SIZE - p->hb.h - p->hb.y - EPSILON;
+                    p->y = y * BLOCK_SIZE - p->hb.h - p->hb.y /*- EPSILON*/;
                 } else if (p->velY < 0) { // moving up
                     p->y = (y + 1) * BLOCK_SIZE - p->hb.y;
                 }
@@ -702,7 +720,6 @@ void updatePlayer(Player *p, float dt, Camera *cam, ChunkMap *map) {
 
                 int screenX = (x * BLOCK_SIZE) - (int)cam->x + (GetScreenWidth() / 2);
                 int screenY = (y * BLOCK_SIZE) - (int)cam->y + (GetScreenHeight() / 2);
-
                 DrawRectangle(screenX, screenY, BLOCK_SIZE, BLOCK_SIZE, (Color){ 255, 0, 0, 100 });
                 goto endy;
             }
@@ -765,19 +782,9 @@ int updateGame(Game *game) {
 
     float dt = GetFrameTime();
 
-
-    // if (IsKeyDown(KEY_A))
-    //     game->camera.x -= 15;
-    // if (IsKeyDown(KEY_D))
-    //     game->camera.x += 15;
-    // if (IsKeyDown(KEY_W))
-    //     game->camera.y -= 15;
-    // if (IsKeyDown(KEY_S))
-    //     game->camera.y += 15;
-
     BeginDrawing();
     ClearBackground(SKYBLUE);
-    updateChunks(game->chunkMap, game->camera.x, game->camera.y, 8);
+    updateChunks(game->chunkMap, game->camera.x, game->camera.y, 2);
     updatePlayer(&game->player, dt, &game->camera, game->chunkMap);
     drawPlayer(&game->player, &game->camera);
     DrawFPS(5, 5);
