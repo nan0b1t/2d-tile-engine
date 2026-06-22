@@ -21,12 +21,13 @@
 
 #define CHUNK_MNGR_ACTIVE_CHUNKS_SIZE 16
 
-#define PLAYER_SPEED 400
-#define PLAYER_JUMP_FORCE 500
-#define PLAYER_GRAVITY 750
+#define PLAYER_SPEED 700
+#define PLAYER_JUMP_FORCE 400
+#define PLAYER_GRAVITY 550
 #define PLAYER_GRAVITY_FALLING 1000
 #define PLAYER_FRICTION 400
 #define PLAYER_MAX_SPEED 300
+#define PLAYER_MAX_JUMP_SECS 0.2
 
 #define PLAYER_WIDTH  BLOCK_SIZE - 2
 #define PLAYER_HEIGHT BLOCK_SIZE * 1.5
@@ -626,6 +627,9 @@ typedef struct Player {
     float x;
     float y;
     Hitbox hb;
+    float jumpCounter;
+    bool grounded;
+    bool hasJumped;
 } Player;
 
 void updatePlayer(Player *p, float dt, Camera *cam, ChunkMap *map) {
@@ -635,7 +639,22 @@ void updatePlayer(Player *p, float dt, Camera *cam, ChunkMap *map) {
 
     // if (IsKeyDown(KEY_A)) p->velX -= mv;
     // if (IsKeyDown(KEY_D)) p->velX += mv;
-    if (IsKeyDown(KEY_W)) p->velY = -PLAYER_JUMP_FORCE;
+    if (IsKeyDown(KEY_W) && p->grounded) {
+        p->velY = -PLAYER_JUMP_FORCE;
+        if (!p->hasJumped) p->jumpCounter = PLAYER_MAX_JUMP_SECS;
+        p->hasJumped = true;
+    }
+
+    p->jumpCounter -= dt;
+
+    if (IsKeyReleased(KEY_W)) {
+        p->grounded = false;
+        p->velY *= 0.5;
+    }
+
+    if (p->jumpCounter < 0) p->grounded = false;
+
+    // printf("Player grounded: %d, JumpCounter: %f, hasJumped: %d\n", p->grounded, p->jumpCounter, p->hasJumped);
     // if (IsKeyDown(KEY_S)) p->velY += mv;
 
     /* apply gravity */
@@ -739,6 +758,8 @@ void updatePlayer(Player *p, float dt, Camera *cam, ChunkMap *map) {
             if (t != NULL && t->bits.foreground != 0) {
                 if (p->velY > 0) { // moving down
                     p->y = y * BLOCK_SIZE - p->hb.h - p->hb.y /*- EPSILON*/;
+                    p->grounded = true;
+                    p->hasJumped = false;
                 } else if (p->velY < 0) { // moving up
                     p->y = (y + 1) * BLOCK_SIZE - p->hb.y;
                 }
