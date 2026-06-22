@@ -21,15 +21,15 @@
 
 #define CHUNK_MNGR_ACTIVE_CHUNKS_SIZE 16
 
-#define PLAYER_SPEED 500
+#define PLAYER_SPEED 400
 #define PLAYER_JUMP_FORCE 500
 #define PLAYER_GRAVITY 750
 #define PLAYER_GRAVITY_FALLING 1000
-#define PLAYER_FRICTION 10
-#define PLAYER_MAX_SPEED 500
+#define PLAYER_FRICTION 400
+#define PLAYER_MAX_SPEED 300
 
 #define PLAYER_WIDTH  BLOCK_SIZE - 2
-#define PLAYER_HEIGHT BLOCK_SIZE * 2
+#define PLAYER_HEIGHT BLOCK_SIZE * 1.5
 #define PLAYER_HB_OFFSET_Y 0
 #define PLAYER_HB_OFFSET_X 0
 
@@ -480,7 +480,7 @@ void generateChunk(i32 x, i32 y, Chunk *chunk, ChunkMap *map, TableMeta *meta) {
             }
 
             if (chunk->blocks[j * CHUNK_SIZE + i].data != 0 && chunk->blocks[j * CHUNK_SIZE + i].bits.foreground != 4) {
-                double noise = fabs(noise_2d((double)projX * 0.05, (double)projY * 0.05, SEED));
+                double noise = fabs(noise_2d((double)projX * 0.02, (double)projY * 0.02, SEED));
                 double threshold = MIN(MAX(((double)projY / 400) * 0.15, 0.05), 0.15);
                 if (noise < threshold && noise > -threshold) {
                     chunk->blocks[j * CHUNK_SIZE + i].bits.foreground = 0;
@@ -633,8 +633,8 @@ void updatePlayer(Player *p, float dt, Camera *cam, ChunkMap *map) {
 
     float mv = PLAYER_SPEED * dt;
 
-    if (IsKeyDown(KEY_A)) p->velX -= mv;
-    if (IsKeyDown(KEY_D)) p->velX += mv;
+    // if (IsKeyDown(KEY_A)) p->velX -= mv;
+    // if (IsKeyDown(KEY_D)) p->velX += mv;
     if (IsKeyDown(KEY_W)) p->velY = -PLAYER_JUMP_FORCE;
     // if (IsKeyDown(KEY_S)) p->velY += mv;
 
@@ -645,14 +645,30 @@ void updatePlayer(Player *p, float dt, Camera *cam, ChunkMap *map) {
         p->velY += PLAYER_GRAVITY_FALLING * dt;
     }
 
-    /* apply friction */
-    if (p->velX > 0) {
-        p->velX -= PLAYER_FRICTION * dt;
-        if (p->velX < 0) p->velX = 0;
-    }
-    if (p->velX < 0) {
-        p->velX += PLAYER_FRICTION * dt;
-        if (p->velX > 0) p->velX = 0;
+    // /* apply friction */
+    // if (p->velX > 0 && !IsKeyDown(KEY_RIGHT)) {
+    //     p->velX -= PLAYER_FRICTION * dt;
+    //     if (p->velX < 0) p->velX = 0;
+    // }
+    // if (p->velX < 0 && !IsKeyDown(KEY_LEFT)) {
+    //     p->velX += PLAYER_FRICTION * dt;
+    //     if (p->velX > 0) p->velX = 0;
+    // }
+    bool moving = IsKeyDown(KEY_A) || IsKeyDown(KEY_D);
+
+    if (moving) {
+        // If moving, apply acceleration instead of setting velocity
+        if (IsKeyDown(KEY_A)) p->velX -= PLAYER_SPEED * dt;
+        if (IsKeyDown(KEY_D)) p->velX += PLAYER_SPEED * dt;
+    } else {
+        // 2. Only apply friction when NOT moving
+        if (p->velX > 0) {
+            p->velX -= PLAYER_FRICTION * dt;
+            if (p->velX < 0) p->velX = 0;
+        } else if (p->velX < 0) {
+            p->velX += PLAYER_FRICTION * dt;
+            if (p->velX > 0) p->velX = 0;
+        }
     }
 
     /* constrain speed*/
@@ -740,9 +756,9 @@ void updatePlayer(Player *p, float dt, Camera *cam, ChunkMap *map) {
 
 
     cam->x = p->x;
-    cam->x += GetMouseDelta().x;
+    cam->x += (GetMouseX() - GetScreenWidth() / 2) * 0.5;
     cam->y = p->y;
-    cam->y += GetMouseDelta().y;
+    cam->y += (GetMouseY() - GetScreenHeight() / 2) * 0.5;
 }
 
 void drawPlayer(Player *p, Camera *cam) {
@@ -786,7 +802,7 @@ int initGame(Game *game) {
 
     InitWindow(800, 600, "random block game idk bro");
     SetConfigFlags(FLAG_FULLSCREEN_MODE);
-    DisableCursor();
+    // DisableCursor();
     return 0;
 }
 
@@ -796,7 +812,7 @@ int updateGame(Game *game) {
     }
 
     float dt = GetFrameTime();
-    if (IsKeyDown(KEY_GRAVE)) EnableCursor();
+    // if (IsKeyDown(KEY_GRAVE)) EnableCursor();
 
     BeginDrawing();
     ClearBackground(SKYBLUE);
