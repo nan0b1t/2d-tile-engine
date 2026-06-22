@@ -22,8 +22,9 @@
 #define CHUNK_MNGR_ACTIVE_CHUNKS_SIZE 16
 
 #define PLAYER_SPEED 500
-#define PLAYER_JUMP_FORCE 250
-#define PLAYER_GRAVITY 400
+#define PLAYER_JUMP_FORCE 500
+#define PLAYER_GRAVITY 750
+#define PLAYER_GRAVITY_FALLING 1000
 #define PLAYER_FRICTION 10
 #define PLAYER_MAX_SPEED 500
 
@@ -638,7 +639,11 @@ void updatePlayer(Player *p, float dt, Camera *cam, ChunkMap *map) {
     // if (IsKeyDown(KEY_S)) p->velY += mv;
 
     /* apply gravity */
-    p->velY += PLAYER_GRAVITY * dt;
+    if (p->velY < 0) {
+        p->velY += PLAYER_GRAVITY * dt;
+    } else {
+        p->velY += PLAYER_GRAVITY_FALLING * dt;
+    }
 
     /* apply friction */
     if (p->velX > 0) {
@@ -735,7 +740,9 @@ void updatePlayer(Player *p, float dt, Camera *cam, ChunkMap *map) {
 
 
     cam->x = p->x;
+    cam->x += GetMouseDelta().x;
     cam->y = p->y;
+    cam->y += GetMouseDelta().y;
 }
 
 void drawPlayer(Player *p, Camera *cam) {
