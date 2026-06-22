@@ -22,8 +22,9 @@
 #define CHUNK_MNGR_ACTIVE_CHUNKS_SIZE 16
 
 #define PLAYER_SPEED 500
-#define PLAYER_GRAVITY 50
-#define PLAYER_FRICTION 50
+#define PLAYER_JUMP_FORCE 250
+#define PLAYER_GRAVITY 400
+#define PLAYER_FRICTION 10
 #define PLAYER_MAX_SPEED 500
 
 #define PLAYER_WIDTH  BLOCK_SIZE - 2
@@ -627,12 +628,14 @@ typedef struct Player {
 } Player;
 
 void updatePlayer(Player *p, float dt, Camera *cam, ChunkMap *map) {
+    bool drawDebug = IsKeyDown(KEY_GRAVE);
+
     float mv = PLAYER_SPEED * dt;
 
     if (IsKeyDown(KEY_A)) p->velX -= mv;
     if (IsKeyDown(KEY_D)) p->velX += mv;
-    if (IsKeyDown(KEY_W)) p->velY -= mv;
-    if (IsKeyDown(KEY_S)) p->velY += mv;
+    if (IsKeyDown(KEY_W)) p->velY = -PLAYER_JUMP_FORCE;
+    // if (IsKeyDown(KEY_S)) p->velY += mv;
 
     /* apply gravity */
     p->velY += PLAYER_GRAVITY * dt;
@@ -693,7 +696,9 @@ void updatePlayer(Player *p, float dt, Camera *cam, ChunkMap *map) {
                 int screenX = (x * BLOCK_SIZE) - (int)cam->x + (GetScreenWidth() / 2);
                 int screenY = (y * BLOCK_SIZE) - (int)cam->y + (GetScreenHeight() / 2);
 
-                DrawRectangle(screenX, screenY, BLOCK_SIZE, BLOCK_SIZE, (Color){ 255, 0, 0, 100 });
+                if (drawDebug)
+                    DrawRectangle(screenX, screenY, BLOCK_SIZE, BLOCK_SIZE, (Color){ 255, 0, 0, 100 });
+
                 p->velX = 0;
                 goto endx;
             }
@@ -720,12 +725,14 @@ void updatePlayer(Player *p, float dt, Camera *cam, ChunkMap *map) {
 
                 int screenX = (x * BLOCK_SIZE) - (int)cam->x + (GetScreenWidth() / 2);
                 int screenY = (y * BLOCK_SIZE) - (int)cam->y + (GetScreenHeight() / 2);
-                DrawRectangle(screenX, screenY, BLOCK_SIZE, BLOCK_SIZE, (Color){ 255, 0, 0, 100 });
+                if (drawDebug)
+                    DrawRectangle(screenX, screenY, BLOCK_SIZE, BLOCK_SIZE, (Color){ 255, 0, 0, 100 });
                 goto endy;
             }
         }
     }
     endy:
+
 
     cam->x = p->x;
     cam->y = p->y;
@@ -772,6 +779,7 @@ int initGame(Game *game) {
 
     InitWindow(800, 600, "random block game idk bro");
     SetConfigFlags(FLAG_FULLSCREEN_MODE);
+    DisableCursor();
     return 0;
 }
 
@@ -781,6 +789,7 @@ int updateGame(Game *game) {
     }
 
     float dt = GetFrameTime();
+    if (IsKeyDown(KEY_GRAVE)) EnableCursor();
 
     BeginDrawing();
     ClearBackground(SKYBLUE);
