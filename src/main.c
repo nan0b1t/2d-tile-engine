@@ -811,23 +811,29 @@ void updatePlayer(Player *p, float dt, Camera *cam, ChunkMap *map) {
     ;
     i32 mx = GetMouseX();
     i32 my = GetMouseY();
-    cam->x = p->x;
-    cam->x += (int)(mx - HALF_SCREEN_W) * 0.5;
-    cam->y = p->y;
-    cam->y += (int)(my - HALF_SCREEN_H) * 0.5;
 
-    i32 mtx = getTileCoord((mx + (float)HALF_SCREEN_W - cam->x), BLOCK_SIZE);
-    i32 mty = getTileCoord((my + (float)HALF_SCREEN_H - cam->y), BLOCK_SIZE);
+    cam->x = p->x + (int)(mx - HALF_SCREEN_W) * 0.5f;
+    cam->y = p->y + (int)(my - HALF_SCREEN_H) * 0.5f;
 
-    // DrawRectangle((mx / BLOCK_SIZE) * BLOCK_SIZE, (my / BLOCK_SIZE) * BLOCK_SIZE,
-    //               BLOCK_SIZE, BLOCK_SIZE, (Color){211, 211, 211, 100});
+    i32 mouseWorldX = mx + cam->x - HALF_SCREEN_W;
+    i32 mouseWorldY = my + cam->y - HALF_SCREEN_H;
+
+    i32 mtx = (i32)floor((float)mouseWorldX / BLOCK_SIZE);
+    i32 mty = (i32)floor((float)mouseWorldY / BLOCK_SIZE);
+
+    i32 tileScreenX = (mtx * BLOCK_SIZE) - cam->x + HALF_SCREEN_W;
+    i32 tileScreenY = (mty * BLOCK_SIZE) - cam->y + HALF_SCREEN_H;
+
+    DrawRectangle(tileScreenX, tileScreenY, BLOCK_SIZE, BLOCK_SIZE, (Color){211, 211, 211, 100});
 
     Tile *mTile = getTile(mtx, mty, map);
-    if (IsMouseButtonDown(MOUSE_BUTTON_LEFT)) {
-        mTile->bits.foreground = 0;
-    }
-    if (IsMouseButtonDown(MOUSE_BUTTON_RIGHT) && mTile->bits.foreground == 0) {
-        mTile->bits.foreground = 1;
+    if (mTile != NULL) {
+        if (IsMouseButtonDown(MOUSE_BUTTON_LEFT)) {
+            mTile->bits.foreground = 0;
+        }
+        if (IsMouseButtonDown(MOUSE_BUTTON_RIGHT) && mTile->bits.foreground == 0) {
+            mTile->bits.foreground = 1;
+        }
     }
 }
 
