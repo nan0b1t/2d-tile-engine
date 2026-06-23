@@ -395,10 +395,10 @@ double noise_2d(double x, double y, int32_t seed) {
 void generateChunk(i32 x, i32 y, Chunk *chunk, ChunkMap *map, TableMeta *meta);
 Tile *getTile(i32 x, i32 y, ChunkMap *map) {
 
-    i32 cx = x >> 5; 
+    i32 cx = x >> 5;
     i32 cy = y >> 5;
 
-    i32 localX = x & 31; 
+    i32 localX = x & 31;
     i32 localY = y & 31;
 
     ChunkPair pair = touchChunk(map, cx, cy);
@@ -414,10 +414,10 @@ Tile *getTile(i32 x, i32 y, ChunkMap *map) {
 
 void setTileFG(i32 x, i32 y, ChunkMap *map, u32 fg) {
 
-    i32 cx = x >> 5; 
+    i32 cx = x >> 5;
     i32 cy = y >> 5;
 
-    i32 localX = x & 31; 
+    i32 localX = x & 31;
     i32 localY = y & 31;
 
     ChunkPair pair = touchChunk(map, cx, cy);
@@ -801,7 +801,7 @@ void updatePlayer(Player *p, float dt, Camera *cam, ChunkMap *map) {
                 int screenX = (x * BLOCK_SIZE) - (int)cam->x + (HALF_SCREEN_W);
                 int screenY = (y * BLOCK_SIZE) - (int)cam->y + (HALF_SCREEN_H);
                 if (drawDebug)
-                    DrawRectangle(screenX, screenY, BLOCK_SIZE, BLOCK_SIZE, (Color){ 255, 0, 0, 100 });
+                    DrawRectangle(screenX, screenY, BLOCK_SIZE, BLOCK_SIZE, (Color){255, 0, 0, 100});
                 goto endy;
             }
         }
@@ -816,11 +816,11 @@ void updatePlayer(Player *p, float dt, Camera *cam, ChunkMap *map) {
     cam->y = p->y;
     cam->y += (int)(my - HALF_SCREEN_H) * 0.5;
 
-    i32 mtx = getTileCoord((mx - (float)HALF_SCREEN_W + cam->x), BLOCK_SIZE);
-    i32 mty = getTileCoord((my - (float)HALF_SCREEN_H + cam->y), BLOCK_SIZE);
+    i32 mtx = getTileCoord((mx + (float)HALF_SCREEN_W - cam->x), BLOCK_SIZE);
+    i32 mty = getTileCoord((my + (float)HALF_SCREEN_H - cam->y), BLOCK_SIZE);
 
-    DrawRectangle((mx / BLOCK_SIZE) * BLOCK_SIZE, (my / BLOCK_SIZE) * BLOCK_SIZE,
-                  BLOCK_SIZE, BLOCK_SIZE, (Color){211, 211, 211, 100});
+    // DrawRectangle((mx / BLOCK_SIZE) * BLOCK_SIZE, (my / BLOCK_SIZE) * BLOCK_SIZE,
+    //               BLOCK_SIZE, BLOCK_SIZE, (Color){211, 211, 211, 100});
 
     Tile *mTile = getTile(mtx, mty, map);
     if (IsMouseButtonDown(MOUSE_BUTTON_LEFT)) {
