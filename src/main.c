@@ -36,6 +36,9 @@
 
 #define EPSILON 0.001f
 
+#define HALF_SCREEN_W GetScreenWidth() / 2
+#define HALF_SCREEN_H GetScreenHeight() / 2
+
 #if defined(_MSC_VER)
     /* MSVC Style */
     #define PACK_START __pragma(pack(push, 1))
@@ -49,6 +52,17 @@
 #endif
 
 int frame = 0;
+
+
+int getTileCoord(float coord, float blockSize) {
+    int val = (int)(coord / blockSize);
+    float remainder = coord - (val * blockSize);
+
+    if (remainder < 0) {
+        val--;
+    }
+    return val;
+}
 
 static inline u32 betterModulo(i32 x, i32 y) {
     x = x % y;
@@ -397,6 +411,25 @@ Tile *getTile(i32 x, i32 y, ChunkMap *map) {
     return &pair.chunk->blocks[(localY * 32) + localX];
 }
 
+
+void setTileFG(i32 x, i32 y, ChunkMap *map, u32 fg) {
+
+    i32 cx = x >> 5; 
+    i32 cy = y >> 5;
+
+    i32 localX = x & 31; 
+    i32 localY = y & 31;
+
+    ChunkPair pair = touchChunk(map, cx, cy);
+    if (pair.chunk == NULL) {
+        return; // table full
+    }
+    if (pair.meta->state == SLOT_FULL && !pair.meta->generated) {
+        generateChunk(cx, cy, pair.chunk, map, pair.meta);
+    }
+    pair.chunk->blocks[(localY * 32) + localX].bits.foreground = fg;
+}
+
 void fillColBottom(u32 *chunk, int col,
                    i32 fillSize, u32 fillVal, i32 emptyVal
 ) {
@@ -526,8 +559,8 @@ void updateChunks(ChunkMap *map, i32 x, i32 y, i32 renderDistChunks) {
                 int worldPixelX = (i * CHUNK_SIZE + localBlockX) * BLOCK_SIZE;
                 int worldPixelY = (j * CHUNK_SIZE + localBlockY) * BLOCK_SIZE;
 
-                int drawX = worldPixelX - x + GetScreenWidth() / 2;
-                int drawY = worldPixelY - y + GetScreenHeight() / 2;
+                int drawX = worldPixelX - x + HALF_SCREEN_W;
+                int drawY = worldPixelY - y + HALF_SCREEN_H;
 
 
                 bool drewFG = false;
@@ -733,8 +766,8 @@ void updatePlayer(Player *p, float dt, Camera *cam, ChunkMap *map) {
                 } else if (p->velX < 0) { /* Moving Left */
                         p->x = (x + 1) * BLOCK_SIZE - p->hb.x;
                 }
-                int screenX = (x * BLOCK_SIZE) - (int)cam->x + (GetScreenWidth() / 2);
-                int screenY = (y * BLOCK_SIZE) - (int)cam->y + (GetScreenHeight() / 2);
+                int screenX = (x * BLOCK_SIZE) - (int)cam->x + (HALF_SCREEN_W);
+                int screenY = (y * BLOCK_SIZE) - (int)cam->y + (HALF_SCREEN_H);
 
                 if (drawDebug)
                     DrawRectangle(screenX, screenY, BLOCK_SIZE, BLOCK_SIZE, (Color){ 255, 0, 0, 100 });
@@ -765,8 +798,8 @@ void updatePlayer(Player *p, float dt, Camera *cam, ChunkMap *map) {
                 }
                 p->velY = 0;
 
-                int screenX = (x * BLOCK_SIZE) - (int)cam->x + (GetScreenWidth() / 2);
-                int screenY = (y * BLOCK_SIZE) - (int)cam->y + (GetScreenHeight() / 2);
+                int screenX = (x * BLOCK_SIZE) - (int)cam->x + (HALF_SCREEN_W);
+                int screenY = (y * BLOCK_SIZE) - (int)cam->y + (HALF_SCREEN_H);
                 if (drawDebug)
                     DrawRectangle(screenX, screenY, BLOCK_SIZE, BLOCK_SIZE, (Color){ 255, 0, 0, 100 });
                 goto endy;
@@ -775,16 +808,32 @@ void updatePlayer(Player *p, float dt, Camera *cam, ChunkMap *map) {
     }
     endy:
 
-
+    ;
+    i32 mx = GetMouseX();
+    i32 my = GetMouseY();
     cam->x = p->x;
-    cam->x += (GetMouseX() - GetScreenWidth() / 2) * 0.5;
+    cam->x += (int)(mx - HALF_SCREEN_W) * 0.5;
     cam->y = p->y;
-    cam->y += (GetMouseY() - GetScreenHeight() / 2) * 0.5;
+    cam->y += (int)(my - HALF_SCREEN_H) * 0.5;
+
+    i32 mtx = getTileCoord((mx - (float)HALF_SCREEN_W + cam->x), BLOCK_SIZE);
+    i32 mty = getTileCoord((my - (float)HALF_SCREEN_H + cam->y), BLOCK_SIZE);
+
+    DrawRectangle((mx / BLOCK_SIZE) * BLOCK_SIZE, (my / BLOCK_SIZE) * BLOCK_SIZE,
+                  BLOCK_SIZE, BLOCK_SIZE, (Color){211, 211, 211, 100});
+
+    Tile *mTile = getTile(mtx, mty, map);
+    if (IsMouseButtonDown(MOUSE_BUTTON_LEFT)) {
+        mTile->bits.foreground = 0;
+    }
+    if (IsMouseButtonDown(MOUSE_BUTTON_RIGHT) && mTile->bits.foreground == 0) {
+        mTile->bits.foreground = 1;
+    }
 }
 
 void drawPlayer(Player *p, Camera *cam) {
-    int x = (int)(p->x + p->hb.x) - cam->x + GetScreenWidth()  / 2;
-    int y = (int)(p->y + p->hb.y) - cam->y + GetScreenHeight() / 2;
+    int x = (int)(p->x + p->hb.x) - cam->x + HALF_SCREEN_W;
+    int y = (int)(p->y + p->hb.y) - cam->y + HALF_SCREEN_H;
 
 
     DrawRectangle(x, y, p->hb.w, p->hb.h, BLUE);
