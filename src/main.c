@@ -665,69 +665,11 @@ typedef struct Player {
     bool hasJumped;
 } Player;
 
-void updatePlayer(Player *p, float dt, Camera *cam, ChunkMap *map) {
-    bool drawDebug = IsKeyDown(KEY_GRAVE);
+typedef struct HitboxBounds {
+    float left, right, top, bottom;
+} HitboxBounds;
 
-    float mv = PLAYER_SPEED * dt;
-
-    // if (IsKeyDown(KEY_A)) p->velX -= mv;
-    // if (IsKeyDown(KEY_D)) p->velX += mv;
-    if (IsKeyDown(KEY_W) && p->grounded) {
-        p->velY = -PLAYER_JUMP_FORCE;
-        if (!p->hasJumped) p->jumpCounter = PLAYER_MAX_JUMP_SECS;
-        p->hasJumped = true;
-    }
-
-    p->jumpCounter -= dt;
-
-    if (IsKeyReleased(KEY_W)) {
-        p->grounded = false;
-        p->velY *= 0.5;
-    }
-
-    if (p->jumpCounter < 0) p->grounded = false;
-
-    // printf("Player grounded: %d, JumpCounter: %f, hasJumped: %d\n", p->grounded, p->jumpCounter, p->hasJumped);
-    // if (IsKeyDown(KEY_S)) p->velY += mv;
-
-    /* apply gravity */
-    if (p->velY < 0) {
-        p->velY += PLAYER_GRAVITY * dt;
-    } else {
-        p->velY += PLAYER_GRAVITY_FALLING * dt;
-    }
-
-    // /* apply friction */
-    // if (p->velX > 0 && !IsKeyDown(KEY_RIGHT)) {
-    //     p->velX -= PLAYER_FRICTION * dt;
-    //     if (p->velX < 0) p->velX = 0;
-    // }
-    // if (p->velX < 0 && !IsKeyDown(KEY_LEFT)) {
-    //     p->velX += PLAYER_FRICTION * dt;
-    //     if (p->velX > 0) p->velX = 0;
-    // }
-    bool moving = IsKeyDown(KEY_A) || IsKeyDown(KEY_D);
-
-    if (moving) {
-        // If moving, apply acceleration instead of setting velocity
-        if (IsKeyDown(KEY_A)) p->velX -= PLAYER_SPEED * dt;
-        if (IsKeyDown(KEY_D)) p->velX += PLAYER_SPEED * dt;
-    } else {
-        // 2. Only apply friction when NOT moving
-        if (p->velX > 0) {
-            p->velX -= PLAYER_FRICTION * dt;
-            if (p->velX < 0) p->velX = 0;
-        } else if (p->velX < 0) {
-            p->velX += PLAYER_FRICTION * dt;
-            if (p->velX > 0) p->velX = 0;
-        }
-    }
-
-    /* constrain speed*/
-    if (p->velX >  PLAYER_MAX_SPEED) p->velX =  PLAYER_MAX_SPEED;
-    if (p->velX < -PLAYER_MAX_SPEED) p->velX = -PLAYER_MAX_SPEED;
-
-    /* construct hitbox */
+inline HitboxBounds collisionDetectandResolve(Player *p, ChunkMap *map, bool drawDebug, Camera *cam, float dt) {
     p->hb.x = PLAYER_HB_OFFSET_X;
     p->hb.y = PLAYER_HB_OFFSET_Y;
 
@@ -806,9 +748,78 @@ void updatePlayer(Player *p, float dt, Camera *cam, ChunkMap *map) {
             }
         }
     }
-    endy:
+    endy: ;
 
-    ;
+    CALC_BOUNDS;
+    return (HitboxBounds){left, right, top, bottom};
+    #undef CALC_BOUNDS
+}
+
+void updatePlayer(Player *p, float dt, Camera *cam, ChunkMap *map) {
+    bool drawDebug = IsKeyDown(KEY_GRAVE);
+
+    float mv = PLAYER_SPEED * dt;
+
+    // if (IsKeyDown(KEY_A)) p->velX -= mv;
+    // if (IsKeyDown(KEY_D)) p->velX += mv;
+    if (IsKeyDown(KEY_W) && p->grounded) {
+        p->velY = -PLAYER_JUMP_FORCE;
+        if (!p->hasJumped) p->jumpCounter = PLAYER_MAX_JUMP_SECS;
+        p->hasJumped = true;
+    }
+
+    p->jumpCounter -= dt;
+
+    if (IsKeyReleased(KEY_W)) {
+        p->grounded = false;
+        p->velY *= 0.5;
+    }
+
+    if (p->jumpCounter < 0) p->grounded = false;
+
+    // printf("Player grounded: %d, JumpCounter: %f, hasJumped: %d\n", p->grounded, p->jumpCounter, p->hasJumped);
+    // if (IsKeyDown(KEY_S)) p->velY += mv;
+
+    /* apply gravity */
+    if (p->velY < 0) {
+        p->velY += PLAYER_GRAVITY * dt;
+    } else {
+        p->velY += PLAYER_GRAVITY_FALLING * dt;
+    }
+
+    // /* apply friction */
+    // if (p->velX > 0 && !IsKeyDown(KEY_RIGHT)) {
+    //     p->velX -= PLAYER_FRICTION * dt;
+    //     if (p->velX < 0) p->velX = 0;
+    // }
+    // if (p->velX < 0 && !IsKeyDown(KEY_LEFT)) {
+    //     p->velX += PLAYER_FRICTION * dt;
+    //     if (p->velX > 0) p->velX = 0;
+    // }
+    bool moving = IsKeyDown(KEY_A) || IsKeyDown(KEY_D);
+
+    if (moving) {
+        // If moving, apply acceleration instead of setting velocity
+        if (IsKeyDown(KEY_A)) p->velX -= PLAYER_SPEED * dt;
+        if (IsKeyDown(KEY_D)) p->velX += PLAYER_SPEED * dt;
+    } else {
+        // 2. Only apply friction when NOT moving
+        if (p->velX > 0) {
+            p->velX -= PLAYER_FRICTION * dt;
+            if (p->velX < 0) p->velX = 0;
+        } else if (p->velX < 0) {
+            p->velX += PLAYER_FRICTION * dt;
+            if (p->velX > 0) p->velX = 0;
+        }
+    }
+
+    /* constrain speed*/
+    if (p->velX >  PLAYER_MAX_SPEED) p->velX =  PLAYER_MAX_SPEED;
+    if (p->velX < -PLAYER_MAX_SPEED) p->velX = -PLAYER_MAX_SPEED;
+
+    /* collision detection */
+    HitboxBounds pBounds = collisionDetectandResolve(p, map, drawDebug, cam, dt);
+
     i32 mx = GetMouseX();
     i32 my = GetMouseY();
 
@@ -832,9 +843,31 @@ void updatePlayer(Player *p, float dt, Camera *cam, ChunkMap *map) {
             mTile->bits.foreground = 0;
         }
         if (IsMouseButtonDown(MOUSE_BUTTON_RIGHT) && mTile->bits.foreground == 0) {
-            mTile->bits.foreground = 1;
+            float tLeft   = (float)(mtx * BLOCK_SIZE);
+            float tRight  = tLeft + BLOCK_SIZE;
+            float tTop    = (float)(mty * BLOCK_SIZE);
+            float tBottom = tTop + BLOCK_SIZE;
+
+            bool playerOverlapsTile = (pBounds.left < tRight && pBounds.right > tLeft &&
+                                       pBounds.top < tBottom && pBounds.bottom > tTop);
+            if (!playerOverlapsTile) {
+                Tile *leftTile  = getTile(mtx - 1, mty, map);
+                Tile *rightTile = getTile(mtx + 1, mty, map);
+                Tile *upTile    = getTile(mtx, mty - 1, map);
+                Tile *downTile  = getTile(mtx, mty + 1, map);
+
+                if (
+                    rightTile->bits.foreground != 0 ||
+                    leftTile->bits.foreground != 0  ||
+                    upTile->bits.foreground != 0    ||
+                    downTile->bits.foreground != 0
+                )
+                    mTile->bits.foreground = 1;
+            }
         }
     }
+
+    #undef CALC_BOUNDS
 }
 
 void drawPlayer(Player *p, Camera *cam) {
