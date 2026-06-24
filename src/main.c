@@ -471,7 +471,6 @@ void setTileFG(i32 x, i32 y, ChunkMap *map, u32 fg) {
 
 void generateChunk(i32 x, i32 y, Chunk *chunk, ChunkMap *map, TableMeta *meta) {
 
-    printf("loading chunk from disk... %d %d\n", x, y);
     struct stat buf;
     char fileName[50];
     snprintf(fileName, sizeof(fileName), CHUNK_LOAD, x, y);
