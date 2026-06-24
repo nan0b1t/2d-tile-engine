@@ -13,7 +13,7 @@
 #define BASE_HEIGHT 200
 #define BLOCK_SIZE 16
 
-#define CLAMP(val, min, max)                                                   \
+#define CLAMP(val, min, max) \
     ((val) < (min) ? (min) : ((val) > (max) ? (max) : (val)))
 #define MAX(a, b) (((a) > (b)) ? (a) : (b))
 #define MIN(a, b) (((a) < (b)) ? (a) : (b))
@@ -179,8 +179,6 @@ Chunk *getChunkMut(ChunkMap *chunkMap, i32 x, i32 y) {
     while (chunkMap->meta[hash].state != SLOT_EMPTY) {
         if (chunkMap->meta[hash].state == SLOT_FULL &&
             chunkMap->meta[hash].x == x && chunkMap->meta[hash].y == y) {
-            if (!chunkMap->meta[hash].dirty) {
-            }
 
             return &chunkMap->chunks[hash];
         }
@@ -266,6 +264,8 @@ ChunkPair touchChunk(ChunkMap *chunkMap, i32 x, i32 y) {
     chunkMap->meta[targChunk].x = x;
     chunkMap->meta[targChunk].y = y;
     chunkMap->meta[targChunk].state = SLOT_FULL;
+    chunkMap->meta[targChunk].dirty = false;
+    chunkMap->meta[targChunk].generated = false;
 
     ChunkPair result;
     result.chunk = &chunkMap->chunks[targChunk];
@@ -290,8 +290,10 @@ void removeChunk(ChunkMap *chunkMap, i32 x, i32 y) {
 
 void collectGarbage(ChunkMap *chunkMap, i32 playerX, i32 playerY, i32 renderDistChunks) {
     Point playerChunk;
-    playerChunk.x = playerX / (CHUNK_SIZE * BLOCK_SIZE);
-    playerChunk.y = playerY / (CHUNK_SIZE * BLOCK_SIZE);
+    int chunkPixelSize = CHUNK_SIZE * BLOCK_SIZE;
+
+    playerChunk.x = (playerX < 0) ? (playerX - chunkPixelSize + 1) / chunkPixelSize : playerX / chunkPixelSize;
+    playerChunk.y = (playerY < 0) ? (playerY - chunkPixelSize + 1) / chunkPixelSize : playerY / chunkPixelSize;
 
     for (i32 i = 0; i < TABLE_SIZE; i++) {
         if (chunkMap->meta[i].state == SLOT_FULL &&
@@ -468,18 +470,16 @@ void setTileFG(i32 x, i32 y, ChunkMap *map, u32 fg) {
 }
 
 void generateChunk(i32 x, i32 y, Chunk *chunk, ChunkMap *map, TableMeta *meta) {
-    i32 hash = getTableIndex(x, y);
 
-    if (!map->meta[hash].dirty) {
-        printf("loading chunk from disk... %d %d\n", x, y);
-        struct stat buf;
-        char fileName[50];
-        snprintf(fileName, sizeof(fileName), CHUNK_LOAD, x, y);
-        if (stat(fileName, &buf) == 0) {
-            FILE *fp = fopen(fileName, "rb");
-            fread(&map->chunks[hash], sizeof(Chunk), 1, fp);
-            fclose(fp);
-        }
+    printf("loading chunk from disk... %d %d\n", x, y);
+    struct stat buf;
+    char fileName[50];
+    snprintf(fileName, sizeof(fileName), CHUNK_LOAD, x, y);
+    if (stat(fileName, &buf) == 0) {
+        FILE *fp = fopen(fileName, "rb");
+        fread(chunk, sizeof(Chunk), 1, fp);
+        fclose(fp);
+        return;
     }
 
     i32 worldX = x * CHUNK_SIZE;
@@ -583,7 +583,6 @@ void updateChunks(ChunkMap *map, i32 x, i32 y, i32 renderDistChunks) {
 
                 int drawX = worldPixelX - x + HALF_SCREEN_W;
                 int drawY = worldPixelY - y + HALF_SCREEN_H;
-
 
                 bool drewFG = false;
                 switch (chunk->blocks[b].bits.foreground) {
