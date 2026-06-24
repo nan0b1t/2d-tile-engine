@@ -3,9 +3,13 @@
 #undef Camera
 #include "nums.h"
 #include "stdlib.h"
+#include <sys/stat.h>
 #include <math.h>
 #include <stdio.h>
 
+/* ==============================================================================================*/
+/* CONSTANTS                                                                                     */
+/* ==============================================================================================*/
 #define BASE_HEIGHT 200
 #define BLOCK_SIZE 16
 
@@ -39,6 +43,8 @@
 #define HALF_SCREEN_W GetScreenWidth() / 2
 #define HALF_SCREEN_H GetScreenHeight() / 2
 
+#define CHUNK_LOAD "world/chunks/C_%d_%d"
+
 #if defined(_MSC_VER)
     /* MSVC Style */
     #define PACK_START __pragma(pack(push, 1))
@@ -51,9 +57,10 @@
     #define PACK_ATTR __attribute__((packed))
 #endif
 
-int frame = 0;
 
-
+/* ==============================================================================================*/
+/* MATH                                                                                          */
+/* ==============================================================================================*/
 int getTileCoord(float coord, float blockSize) {
     int val = (int)(coord / blockSize);
     float remainder = coord - (val * blockSize);
@@ -70,11 +77,37 @@ static inline u32 betterModulo(i32 x, i32 y) {
     return x;
 }
 
-enum { SLOT_EMPTY = 0, SLOT_FULL = 1, TOMBSTONE = 2 };
-
 typedef struct Point {
     i32 x; i32 y;
 } Point;
+
+float distance(Point a, Point b) {
+    return sqrt((a.x - b.x) * (a.x - b.x) + (a.y - b.y) * (a.y - b.y));
+}
+
+Point globalToBlock(i32 x, i32 y) {
+    return (Point) {
+        .x = betterModulo(x, BLOCK_SIZE),
+        .y = betterModulo(y, BLOCK_SIZE) 
+    };
+}
+
+Point blockToChunk(i32 x, i32 y) {
+    return (Point) {
+        .x = betterModulo(x, CHUNK_SIZE),
+        .y = betterModulo(y, CHUNK_SIZE)
+    };
+}
+
+double lerp(double t, double a, double b) {
+    return a + t * (b - a);
+}
+
+/* ==============================================================================================*/
+/* WORLD                                                                                         */
+/* ==============================================================================================*/
+
+enum { SLOT_EMPTY = 0, SLOT_FULL = 1, TOMBSTONE = 2 };
 
 typedef struct BlockBits {
     u32 foreground : 12;
@@ -96,6 +129,7 @@ PACK_START typedef struct TableMeta {
     i32 x, y;
     u8 state;
     bool generated;
+    bool dirty;
 } PACK_ATTR TableMeta;
 
 PACK_END typedef struct ChunkMap {
@@ -139,10 +173,15 @@ const Chunk *getChunk(ChunkMap *chunkMap, i32 x, i32 y) {
 
 Chunk *getChunkMut(ChunkMap *chunkMap, i32 x, i32 y) {
     u32 hash = getTableIndex(x, y);
+
+
     u32 startHash = hash;
     while (chunkMap->meta[hash].state != SLOT_EMPTY) {
         if (chunkMap->meta[hash].state == SLOT_FULL &&
             chunkMap->meta[hash].x == x && chunkMap->meta[hash].y == y) {
+            if (!chunkMap->meta[hash].dirty) {
+            }
+
             return &chunkMap->chunks[hash];
         }
         hash = (hash + 1) & (TABLE_SIZE - 1);
@@ -261,10 +300,19 @@ void collectGarbage(ChunkMap *chunkMap, i32 playerX, i32 playerY, i32 renderDist
             chunkMap->meta[i].y < playerChunk.y - renderDistChunks ||
             chunkMap->meta[i].y > playerChunk.y + renderDistChunks) 
         ) {
+            char buf[50];
+            snprintf(buf, sizeof(buf), CHUNK_LOAD, chunkMap->meta[i].x, chunkMap->meta[i].y);
+            FILE *fp = fopen(buf, "wb");
+            fwrite(&chunkMap->chunks[i], sizeof(chunkMap->chunks[i]), 1, fp);
             chunkMap->meta[i].state = TOMBSTONE;
+            fclose(fp);
         }
     }
 }
+
+/* ==============================================================================================*/
+/* CAMERA                                                                                        */
+/* ==============================================================================================*/
 
 typedef struct {
     int x;
@@ -291,20 +339,9 @@ Point localToBlock(i32 x, i32 y, Camera camera) {
     };
 }
 
-
-Point globalToBlock(i32 x, i32 y) {
-    return (Point) {
-        .x = betterModulo(x, BLOCK_SIZE),
-        .y = betterModulo(x, BLOCK_SIZE) 
-    };
-}
-
-Point blockToChunk(i32 x, i32 y) {
-    return (Point) {
-        .x = betterModulo(x, CHUNK_SIZE),
-        .y = betterModulo(y, CHUNK_SIZE)
-    };
-}
+/* ==============================================================================================*/
+/* WORLDGEN                                                                                      */
+/* ==============================================================================================*/
 
 double magicHash(i32 x, i32 seed) {
     uint32_t state = (i32)x + ((i32)seed * 0x9E3779B9U);
@@ -353,10 +390,6 @@ void hash_2d(int32_t x, int32_t y, int32_t seed, double* out_gx, double* out_gy)
         case 2: *out_gx =  1.0; *out_gy = -1.0; break;
         case 3: *out_gx = -1.0; *out_gy = -1.0; break;
     }
-}
-
-double lerp(double t, double a, double b) {
-    return a + t * (b - a);
 }
 
 
@@ -408,6 +441,8 @@ Tile *getTile(i32 x, i32 y, ChunkMap *map) {
     if (pair.meta->state == SLOT_FULL && !pair.meta->generated) {
         generateChunk(cx, cy, pair.chunk, map, pair.meta);
     }
+
+    pair.meta->dirty = true;
     return &pair.chunk->blocks[(localY * 32) + localX];
 }
 
@@ -428,36 +463,27 @@ void setTileFG(i32 x, i32 y, ChunkMap *map, u32 fg) {
         generateChunk(cx, cy, pair.chunk, map, pair.meta);
     }
     pair.chunk->blocks[(localY * 32) + localX].bits.foreground = fg;
+
+    pair.meta->dirty = true;
 }
-
-void fillColBottom(u32 *chunk, int col,
-                   i32 fillSize, u32 fillVal, i32 emptyVal
-) {
-    if (col < 0 || col >= CHUNK_SIZE) return;
-
-    if (fillSize > CHUNK_SIZE) fillSize = CHUNK_SIZE;
-
-    for (int row = CHUNK_SIZE - 1; row >= 0; row--) {
-        int flatIndex = (row * CHUNK_SIZE) + col;
-
-        int stepsFromBottom = (CHUNK_SIZE - 1) - row;
-
-        if (stepsFromBottom < fillSize) {
-            chunk[flatIndex] = fillVal;
-        } else if (emptyVal != -1){
-            chunk[flatIndex] = emptyVal;
-        }
-    }
-}
-
 
 void generateChunk(i32 x, i32 y, Chunk *chunk, ChunkMap *map, TableMeta *meta) {
+    i32 hash = getTableIndex(x, y);
+
+    if (!map->meta[hash].dirty) {
+        printf("loading chunk from disk... %d %d\n", x, y);
+        struct stat buf;
+        char fileName[50];
+        snprintf(fileName, sizeof(fileName), CHUNK_LOAD, x, y);
+        if (stat(fileName, &buf) == 0) {
+            FILE *fp = fopen(fileName, "rb");
+            fread(&map->chunks[hash], sizeof(Chunk), 1, fp);
+            fclose(fp);
+        }
+    }
+
     i32 worldX = x * CHUNK_SIZE;
     i32 worldY = y * CHUNK_SIZE;
-
-    // printf("generateChunk chunk(%d,%d) worldBlock=(%d,%d)\n", x, y, worldX, worldY);
-
-    bool needsUp = false;
 
     for (int i = 0; i < CHUNK_SIZE; i++) {
         i32 localCol = i;
@@ -490,7 +516,6 @@ void generateChunk(i32 x, i32 y, Chunk *chunk, ChunkMap *map, TableMeta *meta) {
         lava.bits.foreground = 4;
         lava.bits.background = 4;
 
-        // fillColBottom((u32*)chunk->blocks, localCol, fillSize, dirt.data, 0);
         i32 grassStart = colVal;
         i32 dirtStart  = grassStart + 2;
         i32 stoneStart = dirtStart + 10;
@@ -522,12 +547,9 @@ void generateChunk(i32 x, i32 y, Chunk *chunk, ChunkMap *map, TableMeta *meta) {
             }
         }
     }
+    meta->dirty = false;
     meta->generated = true;
 }
-
-typedef struct chunkManager {
-    ChunkPair chunks[CHUNK_MNGR_ACTIVE_CHUNKS_SIZE];
-} chunkManager;
 
 void updateChunks(ChunkMap *map, i32 x, i32 y, i32 renderDistChunks) {
     collectGarbage(map, x, y, renderDistChunks);
@@ -669,7 +691,7 @@ typedef struct HitboxBounds {
     float left, right, top, bottom;
 } HitboxBounds;
 
-inline HitboxBounds collisionDetectandResolve(Player *p, ChunkMap *map, bool drawDebug, Camera *cam, float dt) {
+HitboxBounds collisionDetectandResolve(Player *p, ChunkMap *map, bool drawDebug, Camera *cam, float dt) {
     p->hb.x = PLAYER_HB_OFFSET_X;
     p->hb.y = PLAYER_HB_OFFSET_Y;
 
@@ -835,6 +857,10 @@ void updatePlayer(Player *p, float dt, Camera *cam, ChunkMap *map) {
     i32 tileScreenX = (mtx * BLOCK_SIZE) - cam->x + HALF_SCREEN_W;
     i32 tileScreenY = (mty * BLOCK_SIZE) - cam->y + HALF_SCREEN_H;
 
+    if (distance((Point){mtx, mty},
+                 (Point){(int)floor(p->x / BLOCK_SIZE), (int)floor(p->y / BLOCK_SIZE)}) > 5)
+        return;
+
     DrawRectangle(tileScreenX, tileScreenY, BLOCK_SIZE, BLOCK_SIZE, (Color){211, 211, 211, 100});
 
     Tile *mTile = getTile(mtx, mty, map);
@@ -851,18 +877,22 @@ void updatePlayer(Player *p, float dt, Camera *cam, ChunkMap *map) {
             bool playerOverlapsTile = (pBounds.left < tRight && pBounds.right > tLeft &&
                                        pBounds.top < tBottom && pBounds.bottom > tTop);
             if (!playerOverlapsTile) {
-                Tile *leftTile  = getTile(mtx - 1, mty, map);
-                Tile *rightTile = getTile(mtx + 1, mty, map);
-                Tile *upTile    = getTile(mtx, mty - 1, map);
-                Tile *downTile  = getTile(mtx, mty + 1, map);
-
-                if (
-                    rightTile->bits.foreground != 0 ||
-                    leftTile->bits.foreground != 0  ||
-                    upTile->bits.foreground != 0    ||
-                    downTile->bits.foreground != 0
-                )
+                if (mTile->bits.background != 0) {
                     mTile->bits.foreground = 1;
+                } else {
+                    Tile *leftTile  = getTile(mtx - 1, mty, map);
+                    Tile *rightTile = getTile(mtx + 1, mty, map);
+                    Tile *upTile    = getTile(mtx, mty - 1, map);
+                    Tile *downTile  = getTile(mtx, mty + 1, map);
+
+                    if (
+                        rightTile->bits.foreground != 0 ||
+                        leftTile->bits.foreground != 0  ||
+                        upTile->bits.foreground != 0    ||
+                        downTile->bits.foreground != 0
+                    )
+                        mTile->bits.foreground = 1;
+                }
             }
         }
     }
@@ -930,7 +960,6 @@ int updateGame(Game *game) {
     drawPlayer(&game->player, &game->camera);
     DrawFPS(5, 5);
     EndDrawing();
-    frame++;
     return 1;
 }
 
