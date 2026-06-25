@@ -86,13 +86,13 @@ BlockDef Blocks[] = {
         .invisible = false,
     },
     (BlockDef) {
-        .invisible = false
+        .invisible = true
     },
     (BlockDef) {
-        .invisible = false
+        .invisible = true
     },
     (BlockDef) {
-        .invisible = false
+        .invisible = true
     }
 };
 
@@ -211,7 +211,6 @@ const Chunk *getChunk(ChunkMap *chunkMap, i32 x, i32 y) {
 
 Chunk *getChunkMut(ChunkMap *chunkMap, i32 x, i32 y) {
     u32 hash = getTableIndex(x, y);
-
 
     u32 startHash = hash;
     while (chunkMap->meta[hash].state != SLOT_EMPTY) {
@@ -464,6 +463,33 @@ double noise_2d(double x, double y, int32_t seed) {
     return lerp(v, topBlend, bottomBlend);
 }
 
+Tile* getTileReadOnly(i32 worldX, i32 worldY, ChunkMap* map) {
+    i32 cx = worldX >> 5;
+    i32 cy = worldY >> 5;
+
+    u32 hash = getTableIndex(cx, cy);
+    u32 startHash = hash;
+
+    while (map->meta[hash].state != SLOT_EMPTY) {
+        if (map->meta[hash].state == SLOT_FULL &&
+            map->meta[hash].x == cx &&
+            map->meta[hash].y == cy) {
+
+            if (!map->meta[hash].generated) {
+                return NULL;
+            }
+
+            i32 localX = worldX & (CHUNK_SIZE - 1);
+            i32 localY = worldY & (CHUNK_SIZE - 1);
+            return &map->chunks[hash].blocks[(localY * CHUNK_SIZE) + localX];
+        }
+
+        hash = (hash + 1) & (TABLE_SIZE - 1);
+        if (hash == startHash) break;
+    }
+
+    return NULL;
+}
 
 void generateChunk(i32 x, i32 y, Chunk *chunk, ChunkMap *map, TableMeta *meta);
 Tile *getTile(i32 x, i32 y, ChunkMap *map) {
@@ -476,12 +502,8 @@ Tile *getTile(i32 x, i32 y, ChunkMap *map) {
 
     ChunkPair pair = touchChunk(map, cx, cy);
     if (pair.chunk == NULL) {
-        return NULL; // table full
+        return NULL; /* table full */
     }
-    // if (pair.meta->state == SLOT_FULL && !pair.meta->generated) {
-    //     DrawText("generating chunk from getTile...", 400, 400, 5, RAYWHITE);
-    //     generateChunk(cx, cy, pair.chunk, map, pair.meta);
-    // }
 
     pair.meta->dirty = true;
     return &pair.chunk->blocks[(localY * 32) + localX];
@@ -498,7 +520,7 @@ void setTileFG(i32 x, i32 y, ChunkMap *map, u32 fg) {
 
     ChunkPair pair = touchChunk(map, cx, cy);
     if (pair.chunk == NULL) {
-        return; // table full
+        return; /* table full */
     }
     if (pair.meta->state == SLOT_FULL && !pair.meta->generated) {
         generateChunk(cx, cy, pair.chunk, map, pair.meta);
@@ -605,8 +627,6 @@ void updateChunks(ChunkMap *map, i32 x, i32 y, i32 renderDistChunks) {
                 chunk = pair.chunk;
                 meta = pair.meta;
 
-                printf("generating new chunk on frame %d\n", frame);
-                /* not this */
                 generateChunk(i, j, chunk, map, meta);
             }
 
@@ -633,20 +653,31 @@ void updateChunks(ChunkMap *map, i32 x, i32 y, i32 renderDistChunks) {
                     i32 worldTileY = j * CHUNK_SIZE + localBlockY;
 
                     u32 locFG = chunk->blocks[b].bits.foreground;
-                    if (getTile(worldTileX, worldTileY - 1, map)->bits.foreground == locFG) index |= 1;
-                    if (getTile(worldTileX + 1, worldTileY, map)->bits.foreground == locFG) index |= 2;
-                    if (getTile(worldTileX, worldTileY + 1, map)->bits.foreground == locFG) index |= 4;
-                    if (getTile(worldTileX - 1, worldTileY, map)->bits.foreground == locFG) index |= 8;
+                    Tile* top = getTileReadOnly(worldTileX, worldTileY - 1, map);
+                    if (top != NULL && top->bits.foreground == locFG) {
+                        index |= 1;
+                    }
+
+                    Tile* right = getTileReadOnly(worldTileX + 1, worldTileY, map);
+                    if (right != NULL && right->bits.foreground == locFG) {
+                        index |= 2;
+                    }
+
+                    Tile* bottom = getTileReadOnly(worldTileX, worldTileY + 1, map);
+                    if (bottom != NULL && bottom->bits.foreground == locFG) {
+                        index |= 4;
+                    }
+
+                    Tile* left = getTileReadOnly(worldTileX - 1, worldTileY, map);
+                    if (left != NULL && left->bits.foreground == locFG) {
+                        index |= 8;
+                    }
 
                     Rectangle dest = {.x = (index * 16) % 64,
                                       .y = ((index * 16) / 64) * 16,
                                       .width = 16, .height = 16};
 
                     DrawTexturePro(Blocks[chunk->blocks[b].bits.foreground].texture,
-                                  // (Rectangle){
-                                  //     .x = 16, .y = 16,
-                                  //     .width = 16, .height = 16
-                                  // },
                                   dest,
                                   (Rectangle){
                                       .x = drawX, .y = drawY,
@@ -658,42 +689,6 @@ void updateChunks(ChunkMap *map, i32 x, i32 y, i32 renderDistChunks) {
                     );
                     drewFG = true;
                 }
-
-                // switch (chunk->blocks[b].bits.foreground) {
-                //     case 0: break; /* empty */
-                //     case 1: ;
-                //         DrawRectangle(drawX, drawY,
-                //                       BLOCK_SIZE, BLOCK_SIZE,
-                //                       (Color) {.r = 150, .g = 75, .b = 0, .a = 255});
-                //         drewFG = true;
-                //         break;
-                //
-                //     case 2:
-                //         DrawRectangle(drawX, drawY,
-                //                       BLOCK_SIZE, BLOCK_SIZE,
-                //                       (Color) {.r = 124, .g = 189, .b = 107, .a = 255});
-                //         drewFG = true;
-                //         break;
-                //
-                //     case 3:
-                //         DrawRectangle(drawX, drawY,
-                //                       BLOCK_SIZE, BLOCK_SIZE,
-                //                       (Color) {.r = 149, .g = 150, .b = 149, .a = 255});
-                //         drewFG = true;
-                //         break;
-                //
-                //     case 4:
-                //         DrawRectangle(drawX, drawY,
-                //                       BLOCK_SIZE, BLOCK_SIZE,
-                //                       (Color) {.r = 255, .g = 165, .b = 0, .a = 255});
-                //         drewFG = true;
-                //         break;
-                //
-                //     default:
-                //         DrawRectangle(drawX, drawY, BLOCK_SIZE, BLOCK_SIZE, MAGENTA);
-                //         /* used for invalid blocks */
-                //         break;
-                // }
 
                 if (!drewFG) {
                     switch (chunk->blocks[b].bits.background) {
@@ -718,7 +713,7 @@ void updateChunks(ChunkMap *map, i32 x, i32 y, i32 renderDistChunks) {
                 }
             }
 
-            // debug overlay
+            /* debug overlay */
             if (IsKeyDown(KEY_GRAVE)) {
                 i32 worldX = (i * CHUNK_SIZE * BLOCK_SIZE);
                 i32 projX = worldX - x;
@@ -790,8 +785,6 @@ HitboxBounds collisionDetectandResolve(Player *p, ChunkMap *map, bool drawDebug,
     p->x += p->velX * dt;
 
     CALC_BOUNDS;
-    // printf("player feet world px=(%.1f,%.1f) blockcoord=(%d..%d, %d..%d)\n",
-            // p->x, bottom, minX, maxX, minY, maxY);
 
     for (int y = minY; y <= maxY; y++) {
         for (int x = minX; x <= maxX; x++) {
@@ -826,11 +819,11 @@ HitboxBounds collisionDetectandResolve(Player *p, ChunkMap *map, bool drawDebug,
             Tile *t = getTile(x, y, map);
 
             if (t != NULL && t->bits.foreground != 0) {
-                if (p->velY > 0) { // moving down
+                if (p->velY > 0) { /* moving down */
                     p->y = y * BLOCK_SIZE - p->hb.h - p->hb.y /*- EPSILON*/;
                     p->grounded = true;
                     p->hasJumped = false;
-                } else if (p->velY < 0) { // moving up
+                } else if (p->velY < 0) { /* moving up */
                     p->y = (y + 1) * BLOCK_SIZE - p->hb.y;
                 }
                 p->velY = 0;
@@ -855,8 +848,6 @@ void updatePlayer(Player *p, float dt, Camera *cam, ChunkMap *map) {
 
     float mv = PLAYER_SPEED * dt;
 
-    // if (IsKeyDown(KEY_A)) p->velX -= mv;
-    // if (IsKeyDown(KEY_D)) p->velX += mv;
     if (IsKeyDown(KEY_W) && p->grounded) {
         p->velY = -PLAYER_JUMP_FORCE;
         if (!p->hasJumped) p->jumpCounter = PLAYER_MAX_JUMP_SECS;
@@ -872,8 +863,6 @@ void updatePlayer(Player *p, float dt, Camera *cam, ChunkMap *map) {
 
     if (p->jumpCounter < 0) p->grounded = false;
 
-    // printf("Player grounded: %d, JumpCounter: %f, hasJumped: %d\n", p->grounded, p->jumpCounter, p->hasJumped);
-    // if (IsKeyDown(KEY_S)) p->velY += mv;
 
     /* apply gravity */
     if (p->velY < 0) {
@@ -882,23 +871,12 @@ void updatePlayer(Player *p, float dt, Camera *cam, ChunkMap *map) {
         p->velY += PLAYER_GRAVITY_FALLING * dt;
     }
 
-    // /* apply friction */
-    // if (p->velX > 0 && !IsKeyDown(KEY_RIGHT)) {
-    //     p->velX -= PLAYER_FRICTION * dt;
-    //     if (p->velX < 0) p->velX = 0;
-    // }
-    // if (p->velX < 0 && !IsKeyDown(KEY_LEFT)) {
-    //     p->velX += PLAYER_FRICTION * dt;
-    //     if (p->velX > 0) p->velX = 0;
-    // }
     bool moving = IsKeyDown(KEY_A) || IsKeyDown(KEY_D);
 
     if (moving) {
-        // If moving, apply acceleration instead of setting velocity
         if (IsKeyDown(KEY_A)) p->velX -= PLAYER_SPEED * dt;
         if (IsKeyDown(KEY_D)) p->velX += PLAYER_SPEED * dt;
     } else {
-        // 2. Only apply friction when NOT moving
         if (p->velX > 0) {
             p->velX -= PLAYER_FRICTION * dt;
             if (p->velX < 0) p->velX = 0;
@@ -982,7 +960,6 @@ void drawPlayer(Player *p, Camera *cam) {
 }
 
 typedef struct Game {
-    // World world;
     Camera camera;
     ChunkMap *chunkMap;
     Player player;
@@ -1027,12 +1004,11 @@ int initGame(Game *game) {
 int updateGame(Game *game) {
     frame++;
     if (WindowShouldClose()) {
-        printf("WINDOW CLOSING LOL\n");
+        printf("WINDOW CLOSING\n");
         return 0;
     }
 
     float dt = GetFrameTime();
-    // if (IsKeyDown(KEY_GRAVE)) EnableCursor();
 
     BeginDrawing();
     ClearBackground(SKYBLUE);
