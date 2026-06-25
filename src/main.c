@@ -539,6 +539,8 @@ void generateChunk(i32 x, i32 y, Chunk *chunk, ChunkMap *map, TableMeta *meta) {
         fread(chunk, sizeof(Chunk), 1, fp);
         printf("reading file on frame :%d\n", frame);
         fclose(fp);
+        meta->dirty = false;
+        meta->generated = true;
         return;
     }
 
