@@ -11,7 +11,7 @@
 /* CONSTANTS                                                                                     */
 /* ==============================================================================================*/
 #define BASE_HEIGHT 200
-#define BLOCK_SIZE 32
+#define BLOCK_SIZE 16
 
 #define CLAMP(val, min, max) \
     ((val) < (min) ? (min) : ((val) > (max) ? (max) : (val)))
@@ -86,13 +86,13 @@ BlockDef Blocks[] = {
         .invisible = false,
     },
     (BlockDef) {
-        .invisible = true
+        .invisible = false
     },
     (BlockDef) {
-        .invisible = true
+        .invisible = false
     },
     (BlockDef) {
-        .invisible = true
+        .invisible = false
     }
 };
 
@@ -638,8 +638,9 @@ void updateChunks(ChunkMap *map, i32 x, i32 y, i32 renderDistChunks) {
                     if (getTile(worldTileX, worldTileY + 1, map)->bits.foreground == locFG) index |= 4;
                     if (getTile(worldTileX - 1, worldTileY, map)->bits.foreground == locFG) index |= 8;
 
-                    Rectangle dest = {.x = (index * BLOCK_SIZE) % 64, .y = ((index * BLOCK_SIZE) / 64) * BLOCK_SIZE,
-                                      .width = BLOCK_SIZE, .height = BLOCK_SIZE};
+                    Rectangle dest = {.x = (index * 16) % 64,
+                                      .y = ((index * 16) / 64) * 16,
+                                      .width = 16, .height = 16};
 
                     DrawTexturePro(Blocks[chunk->blocks[b].bits.foreground].texture,
                                   // (Rectangle){
