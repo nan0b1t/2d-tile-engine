@@ -615,22 +615,37 @@ void updateChunks(ChunkMap *map, i32 x, i32 y, i32 renderDistChunks) {
             }
 
             for (int b = 0; b < CHUNK_SIZE * CHUNK_SIZE; b++) {
-                int localBlockX = b % CHUNK_SIZE;
-                int localBlockY = b / CHUNK_SIZE;
+                i32 localBlockX = b % CHUNK_SIZE;
+                i32 localBlockY = b / CHUNK_SIZE;
 
-                int worldPixelX = (i * CHUNK_SIZE + localBlockX) * BLOCK_SIZE;
-                int worldPixelY = (j * CHUNK_SIZE + localBlockY) * BLOCK_SIZE;
+                i32 worldPixelX = (i * CHUNK_SIZE + localBlockX) * BLOCK_SIZE;
+                i32 worldPixelY = (j * CHUNK_SIZE + localBlockY) * BLOCK_SIZE;
 
-                int drawX = worldPixelX - x + HALF_SCREEN_W;
-                int drawY = worldPixelY - y + HALF_SCREEN_H;
+                i32 drawX = worldPixelX - x + HALF_SCREEN_W;
+                i32 drawY = worldPixelY - y + HALF_SCREEN_H;
 
                 bool drewFG = false;
                 if (!Blocks[chunk->blocks[b].bits.foreground].invisible) {
+                    u8 index = 0;
+
+                    /* calculate bitmasking */
+                    i32 worldTileX = i * CHUNK_SIZE + localBlockX;
+                    i32 worldTileY = j * CHUNK_SIZE + localBlockY;
+
+                    u32 locFG = chunk->blocks[b].bits.foreground;
+                    if (getTile(worldTileX, worldTileY - 1, map)->bits.foreground == locFG) index |= 1;
+                    if (getTile(worldTileX + 1, worldTileY, map)->bits.foreground == locFG) index |= 2;
+                    if (getTile(worldTileX, worldTileY + 1, map)->bits.foreground == locFG) index |= 4;
+                    if (getTile(worldTileX - 1, worldTileY, map)->bits.foreground == locFG) index |= 8;
+
+                    Rectangle dest = {.x = (index * BLOCK_SIZE) % 64, .y = ((index * BLOCK_SIZE) / 64) * BLOCK_SIZE};
+
                     DrawTexturePro(Blocks[chunk->blocks[b].bits.foreground].texture,
-                                  (Rectangle){
-                                      .x = BLOCK_SIZE, .y = 16,
-                                      .width = 16, .height = 16
-                                  },
+                                  // (Rectangle){
+                                  //     .x = 16, .y = 16,
+                                  //     .width = 16, .height = 16
+                                  // },
+                                  dest,
                                   (Rectangle){
                                       .x = drawX, .y = drawY,
                                       .width = BLOCK_SIZE, .height = BLOCK_SIZE
