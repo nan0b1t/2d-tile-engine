@@ -638,7 +638,8 @@ void updateChunks(ChunkMap *map, i32 x, i32 y, i32 renderDistChunks) {
                     if (getTile(worldTileX, worldTileY + 1, map)->bits.foreground == locFG) index |= 4;
                     if (getTile(worldTileX - 1, worldTileY, map)->bits.foreground == locFG) index |= 8;
 
-                    Rectangle dest = {.x = (index * BLOCK_SIZE) % 64, .y = ((index * BLOCK_SIZE) / 64) * BLOCK_SIZE};
+                    Rectangle dest = {.x = (index * BLOCK_SIZE) % 64, .y = ((index * BLOCK_SIZE) / 64) * BLOCK_SIZE,
+                                      .width = BLOCK_SIZE, .height = BLOCK_SIZE};
 
                     DrawTexturePro(Blocks[chunk->blocks[b].bits.foreground].texture,
                                   // (Rectangle){
