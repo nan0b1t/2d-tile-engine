@@ -11,7 +11,7 @@
 /* CONSTANTS                                                                                     */
 /* ==============================================================================================*/
 #define BASE_HEIGHT 200
-#define BLOCK_SIZE 16
+#define BLOCK_SIZE 32
 
 #define CLAMP(val, min, max) \
     ((val) < (min) ? (min) : ((val) > (max) ? (max) : (val)))
@@ -37,7 +37,6 @@
 #define PLAYER_HEIGHT BLOCK_SIZE * 1.5
 #define PLAYER_HB_OFFSET_Y 0
 #define PLAYER_HB_OFFSET_X 0
-
 #define EPSILON 0.001f
 
 #define HALF_SCREEN_W GetScreenWidth() / 2
@@ -57,6 +56,45 @@
     #define PACK_ATTR __attribute__((packed))
 #endif
 
+int frame = 0;
+
+typedef struct BlockDef {
+    const char* texturePath;
+    const char* name;
+    Texture2D texture;
+    bool solid;
+    bool invisible;
+} BlockDef;
+
+BlockDef Blocks[] = {
+    (BlockDef) {
+        .name = "Air",
+        .texturePath = "NULL",
+        .solid = false,
+        .invisible = true,
+    },
+    (BlockDef) {
+        .name = "Dirt",
+        .texturePath = "assets/blocks/dirt.png",
+        .solid = false,
+        .invisible = false,
+    },
+    (BlockDef) {
+        .name = "Grass",
+        .texturePath = "assets/blocks/grass.png",
+        .solid = false,
+        .invisible = false,
+    },
+    (BlockDef) {
+        .invisible = true
+    },
+    (BlockDef) {
+        .invisible = true
+    },
+    (BlockDef) {
+        .invisible = true
+    }
+};
 
 /* ==============================================================================================*/
 /* MATH                                                                                          */
@@ -440,9 +478,10 @@ Tile *getTile(i32 x, i32 y, ChunkMap *map) {
     if (pair.chunk == NULL) {
         return NULL; // table full
     }
-    if (pair.meta->state == SLOT_FULL && !pair.meta->generated) {
-        generateChunk(cx, cy, pair.chunk, map, pair.meta);
-    }
+    // if (pair.meta->state == SLOT_FULL && !pair.meta->generated) {
+    //     DrawText("generating chunk from getTile...", 400, 400, 5, RAYWHITE);
+    //     generateChunk(cx, cy, pair.chunk, map, pair.meta);
+    // }
 
     pair.meta->dirty = true;
     return &pair.chunk->blocks[(localY * 32) + localX];
@@ -470,13 +509,13 @@ void setTileFG(i32 x, i32 y, ChunkMap *map, u32 fg) {
 }
 
 void generateChunk(i32 x, i32 y, Chunk *chunk, ChunkMap *map, TableMeta *meta) {
-
     struct stat buf;
     char fileName[50];
     snprintf(fileName, sizeof(fileName), CHUNK_LOAD, x, y);
     if (stat(fileName, &buf) == 0) {
         FILE *fp = fopen(fileName, "rb");
         fread(chunk, sizeof(Chunk), 1, fp);
+        printf("reading file on frame :%d\n", frame);
         fclose(fp);
         return;
     }
@@ -566,6 +605,8 @@ void updateChunks(ChunkMap *map, i32 x, i32 y, i32 renderDistChunks) {
                 chunk = pair.chunk;
                 meta = pair.meta;
 
+                printf("generating new chunk on frame %d\n", frame);
+                /* not this */
                 generateChunk(i, j, chunk, map, meta);
             }
 
@@ -584,41 +625,58 @@ void updateChunks(ChunkMap *map, i32 x, i32 y, i32 renderDistChunks) {
                 int drawY = worldPixelY - y + HALF_SCREEN_H;
 
                 bool drewFG = false;
-                switch (chunk->blocks[b].bits.foreground) {
-                    case 0: break; /* empty */
-                    case 1: ;
-                        DrawRectangle(drawX, drawY,
-                                      BLOCK_SIZE, BLOCK_SIZE,
-                                      (Color) {.r = 150, .g = 75, .b = 0, .a = 255});
-                        drewFG = true;
-                        break;
-
-                    case 2:
-                        DrawRectangle(drawX, drawY,
-                                      BLOCK_SIZE, BLOCK_SIZE,
-                                      (Color) {.r = 124, .g = 189, .b = 107, .a = 255});
-                        drewFG = true;
-                        break;
-
-                    case 3:
-                        DrawRectangle(drawX, drawY,
-                                      BLOCK_SIZE, BLOCK_SIZE,
-                                      (Color) {.r = 149, .g = 150, .b = 149, .a = 255});
-                        drewFG = true;
-                        break;
-
-                    case 4:
-                        DrawRectangle(drawX, drawY,
-                                      BLOCK_SIZE, BLOCK_SIZE,
-                                      (Color) {.r = 255, .g = 165, .b = 0, .a = 255});
-                        drewFG = true;
-                        break;
-
-                    default:
-                        DrawRectangle(drawX, drawY, BLOCK_SIZE, BLOCK_SIZE, MAGENTA);
-                        /* used for invalid blocks */
-                        break;
+                if (!Blocks[chunk->blocks[b].bits.foreground].invisible) {
+                    DrawTexturePro(Blocks[chunk->blocks[b].bits.foreground].texture,
+                                  (Rectangle){
+                                      .x = BLOCK_SIZE, .y = 16,
+                                      .width = 16, .height = 16
+                                  },
+                                  (Rectangle){
+                                      .x = drawX, .y = drawY,
+                                      .width = BLOCK_SIZE, .height = BLOCK_SIZE
+                                  },
+                                  (Vector2)  {.x = 0, .y = 0},
+                                  0.0f,
+                                  (Color){255, 255, 255, 255}
+                    );
+                    drewFG = true;
                 }
+
+                // switch (chunk->blocks[b].bits.foreground) {
+                //     case 0: break; /* empty */
+                //     case 1: ;
+                //         DrawRectangle(drawX, drawY,
+                //                       BLOCK_SIZE, BLOCK_SIZE,
+                //                       (Color) {.r = 150, .g = 75, .b = 0, .a = 255});
+                //         drewFG = true;
+                //         break;
+                //
+                //     case 2:
+                //         DrawRectangle(drawX, drawY,
+                //                       BLOCK_SIZE, BLOCK_SIZE,
+                //                       (Color) {.r = 124, .g = 189, .b = 107, .a = 255});
+                //         drewFG = true;
+                //         break;
+                //
+                //     case 3:
+                //         DrawRectangle(drawX, drawY,
+                //                       BLOCK_SIZE, BLOCK_SIZE,
+                //                       (Color) {.r = 149, .g = 150, .b = 149, .a = 255});
+                //         drewFG = true;
+                //         break;
+                //
+                //     case 4:
+                //         DrawRectangle(drawX, drawY,
+                //                       BLOCK_SIZE, BLOCK_SIZE,
+                //                       (Color) {.r = 255, .g = 165, .b = 0, .a = 255});
+                //         drewFG = true;
+                //         break;
+                //
+                //     default:
+                //         DrawRectangle(drawX, drawY, BLOCK_SIZE, BLOCK_SIZE, MAGENTA);
+                //         /* used for invalid blocks */
+                //         break;
+                // }
 
                 if (!drewFG) {
                     switch (chunk->blocks[b].bits.background) {
@@ -939,12 +997,20 @@ int initGame(Game *game) {
 
     InitWindow(800, 600, "random block game idk bro");
     SetConfigFlags(FLAG_FULLSCREEN_MODE);
-    // DisableCursor();
+
+    printf("loading block textures...\n");
+    for (int i = 0; i < (sizeof Blocks) / sizeof(*Blocks); i++)
+            if (!Blocks[i].invisible)
+                Blocks[i].texture = LoadTexture(Blocks[i].texturePath);
+    printf("done loading block textures\n");
+
     return 0;
 }
 
 int updateGame(Game *game) {
+    frame++;
     if (WindowShouldClose()) {
+        printf("WINDOW CLOSING LOL\n");
         return 0;
     }
 
