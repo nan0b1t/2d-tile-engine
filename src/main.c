@@ -10,6 +10,8 @@
 /* ==============================================================================================*/
 /* CONSTANTS                                                                                     */
 /* ==============================================================================================*/
+#define CRITICAL_ERROR(msg) fprintf(stderr, "CRITICAL ERROR AT LINE %d in function %s: %s", __LINE__, __func__, msg);
+
 #define BASE_HEIGHT 200
 #define BLOCK_SIZE 16
 
@@ -62,13 +64,37 @@
 
 int frame = 0;
 
+typedef struct PackedTexture {
+    Texture2D *texture;
+    int numVariants;
+} PackedTexture;
+
+typedef struct BlockTextureSlice {
+    int x, y;
+    int width, height;
+} BlockTextureSlice;
+
 typedef struct BlockDef {
     const char* texturePath;
     const char* name;
     Texture2D texture;
+    BlockTextureSlice textures;
+    PackedTexture (*textureGenerator)();
     bool solid;
     bool invisible;
+    float hardness;
 } BlockDef;
+
+PackedTexture dirtTexture(Image *imgs, int variants) {
+    if (imgs == NULL) {
+        CRITICAL_ERROR("null pointer passed to *imgs")
+        exit(1);
+    }
+
+    Image baseImg = GenImageColor(8, 8, (Color){120, 64, 8});
+
+}
+
 
 BlockDef Blocks[] = {
     (BlockDef) {
@@ -82,12 +108,14 @@ BlockDef Blocks[] = {
         .texturePath = "assets/blocks/dirt.png",
         .solid = true,
         .invisible = false,
+        .hardness = 0.5
     },
     (BlockDef) {
         .name = "Grass",
         .texturePath = "assets/blocks/grass.png",
         .solid = true,
         .invisible = false,
+        .hardness = 1
     },
     (BlockDef) {
         .invisible = true
@@ -152,24 +180,23 @@ double lerp(double t, double a, double b) {
 enum { SLOT_EMPTY = 0, SLOT_FULL = 1, TOMBSTONE = 2 };
 
 typedef struct BlockBits {
-    u16 id     : 13; /* 4096 possible foregrounds */
+    u16 id     : 13;
     u16 damage :  3;
-    // u64 background : 10; /* 1024 possible foregrounds */
 } BlockBits;
 
 typedef struct BgBits {
-    u16 id     : 13; /* 4096 possible foregrounds */
+    u16 id     : 13;
     u16 damage :  3;
 } BgBits;
 
 typedef union Tile {
     BlockBits bits;
-    u32       data;
+    u16       data;
 } Tile;
 
 typedef union Bg {
     BgBits bits;
-    u32    data;
+    u16    data;
 } Bg;
 
 typedef struct Chunk {
@@ -590,22 +617,35 @@ void generateChunk(i32 x, i32 y, Chunk *chunk, ChunkMap *map, TableMeta *meta) {
         Tile dirt;
         dirt.data = 0;
         dirt.bits.id = 1;
-        dirt.bits.id = 1;
+
+        Bg dirtBg;
+        dirtBg.data = 0;
+        dirtBg.bits.id = 1;
 
         Tile grass;
         grass.data = 0;
         grass.bits.id = 2;
-        grass.bits.id = 2;
+
+        Bg grassBg;
+        grassBg.data = 0;
+        grassBg.bits.id = 2;
 
         Tile stone;
         stone.data = 0;
         stone.bits.id = 3;
-        stone.bits.id = 3;
+
+        Bg stoneBg;
+        stoneBg.data = 0;
+        stoneBg.bits.id = 3;
 
         Tile lava;
         lava.data = 0;
         lava.bits.id = 4;
-        lava.bits.id = 4;
+
+        Bg lavaBg;
+        lavaBg.data = 0;
+        lavaBg.bits.id = 4;
+
 
         i32 grassStart = colVal;
         i32 dirtStart  = grassStart + 2;
@@ -617,15 +657,20 @@ void generateChunk(i32 x, i32 y, Chunk *chunk, ChunkMap *map, TableMeta *meta) {
 
             if (projY < grassStart) {
                 chunk->blocks[j * CHUNK_SIZE + i].data = 0;
+                chunk->bg[j * CHUNK_SIZE + i].data = 0;
             } else if (projY < dirtStart) {
                 chunk->blocks[j * CHUNK_SIZE + i].data = grass.data;
+                chunk->bg[j * CHUNK_SIZE + i].data = grassBg.data;
             } else if (projY < stoneStart) {
                 chunk->blocks[j * CHUNK_SIZE + i].data = dirt.data;
+                chunk->bg[j * CHUNK_SIZE + i].data = dirtBg.data;
             } else {
                 if (worldY < 200) {
                     chunk->blocks[j * CHUNK_SIZE + i].data = stone.data;
+                    chunk->bg[j * CHUNK_SIZE + i].data = stoneBg.data;
                 } else {
                     chunk->blocks[j * CHUNK_SIZE + i].data = lava.data;
+                    chunk->bg[j * CHUNK_SIZE + i].data = stoneBg.data;
                 }
             }
 
@@ -704,9 +749,9 @@ void updateChunks(ChunkMap *map, i32 x, i32 y, i32 renderDistChunks) {
                         index |= 8;
                     }
 
-                    Rectangle dest = {.x = (index * 16) % 64,
-                                      .y = ((index * 16) / 64) * 16,
-                                      .width = 16, .height = 16};
+                    Rectangle dest = {.x = (index * 8) % 32,
+                                      .y = ((index * 8) / 32) * 8,
+                                      .width = 8, .height = 8};
 
                     DrawTexturePro(Blocks[chunk->blocks[b].bits.id].texture,
                                   dest,
@@ -777,13 +822,14 @@ typedef struct {
 
 typedef struct Player {
     Hitbox hb;
-    float velX, velY;
-    float x, y;
-    float jumpCounter;
-    float breakCounter;
-    bool grounded;
-    bool onGround; /* i know its bad code shh */
-    bool hasJumped;
+    float  velX, velY;
+    float  x, y;
+    float  jumpCounter;
+    float  focusTime;
+    Point  lastBlockFocused;
+    bool   grounded;
+    bool   onGround; /* i know its bad code shh */
+    bool   hasJumped;
 } Player;
 
 typedef struct HitboxBounds {
@@ -983,19 +1029,21 @@ void updatePlayer(Player *p, float dt, Camera *cam, ChunkMap *map) {
                  (Point){(int)floor(p->x / BLOCK_SIZE), (int)floor(p->y / BLOCK_SIZE)}) > 5)
         return;
 
-    DrawRectangle(tileScreenX, tileScreenY, BLOCK_SIZE, BLOCK_SIZE, (Color){211, 211, 211, 100});
-
     Tile *mTile       =   getTile(mtx, mty, map);
     Bg   *mBackground = getBgTile(mtx, mty, map);
 
+    DrawRectangle(tileScreenX, tileScreenY, BLOCK_SIZE, BLOCK_SIZE,
+                  (Color){11, 11, 11, 255 * p->focusTime / Blocks[mTile->bits.id].hardness});
+
     if (mTile != NULL) {
         if (IsMouseButtonDown(MOUSE_BUTTON_LEFT)) {
-            p->breakCounter += dt;
-            if (p->breakCounter >= PLAYER_BREAK_SPEED)
-                // mTile->bits.damage += 1; 
-;
+            p->focusTime += dt;
+            if (p->focusTime > Blocks[mTile->bits.id].hardness) {
+                mTile->bits.id = 0;
+                p->focusTime = 0;
+            }
         } else {
-            p->breakCounter = 0;
+            p->focusTime = 0;
         }
         if (IsMouseButtonDown(MOUSE_BUTTON_RIGHT) && mTile->bits.id == 0) {
             float tLeft   = (float)(mtx * BLOCK_SIZE);
@@ -1026,6 +1074,12 @@ void updatePlayer(Player *p, float dt, Camera *cam, ChunkMap *map) {
         }
     }
 
+    if (p->lastBlockFocused.x != mtx || p->lastBlockFocused.y != mty)
+        p->focusTime = 0;
+
+    p->lastBlockFocused = (Point) {mtx, mty};
+
+    DrawText(TextFormat("focus time: %f\n", p->focusTime), 10, 50, 20, BLACK);
     #undef CALC_BOUNDS
 }
 
@@ -1063,17 +1117,22 @@ int initGame(Game *game) {
 
     game->chunkMap = calloc(1, sizeof(ChunkMap));
     if (game->chunkMap == NULL) {
-        perror("couldn't allocate chunkmap");
-        exit(1);
+      perror("couldn't allocate chunkmap");
+      exit(1);
     }
 
-    InitWindow(800, 600, "random block game idk bro");
+    InitWindow(1920, 1080, "random block game idk bro");
     SetConfigFlags(FLAG_FULLSCREEN_MODE);
 
     printf("loading block textures...\n");
     for (int i = 0; i < (sizeof Blocks) / sizeof(*Blocks); i++)
-            if (!Blocks[i].invisible)
-                Blocks[i].texture = LoadTexture(Blocks[i].texturePath);
+            if (!Blocks[i].invisible) {
+                Image ogImage = LoadImage(Blocks[i].texturePath);
+                ImageResize(&ogImage, 8, 8);
+                Texture2D textureResult;
+                Blocks[i].texture = LoadTextureFromImage(ogImage);
+                UnloadImage(ogImage);
+            }
     printf("done loading block textures\n");
 
     return 0;
