@@ -1,5 +1,0 @@
-[INFO] running in release mode
-[INFO] directory `build` already exists
-[INFO] CMD: 'cc ' '-std=c99 ' '-Wall -Wextra -Werror -pedantic -Wnull-dereference  -Wwrite-strings -Wshadow -Wdouble-promotion -Wnoconversion ' '-O3 ' src/main.c ' -o build/game'
-[ERROR] Could not exec child process for cc : No such file or directory
-[ERROR] command exited with exit code 1

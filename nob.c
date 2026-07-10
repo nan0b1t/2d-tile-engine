@@ -74,6 +74,8 @@ int main(int argc, char **argv) {
     append_src_files(&cmd, "src");
     nob_cmd_append(&cmd, "-o");
     nob_cmd_append(&cmd, "build/game");
+    nob_cmd_append(&cmd, "-lm");
+    nob_cmd_append(&cmd, "-lraylib");
 
     if (!nob_cmd_run_sync(cmd)) {
         return 1;

@@ -89,19 +89,19 @@ typedef struct BlockDef {
     float hardness;
 } BlockDef;
 
-PackedTexture dirtTexture(Image *imgs, int variants) {
-    if (imgs == NULL) {
-        CRITICAL_ERROR("null pointer passed to *imgs")
-        exit(1);
-    }
-
-    Image baseImg = GenImageColor(8, 8, (Color){120, 64, 8});
-    return (PackedTexture) {};
-}
+// PackedTexture dirtTexture(Image *imgs, int variants) {
+//     if (imgs == NULL) {
+//         CRITICAL_ERROR("null pointer passed to *imgs")
+//         exit(1);
+//     }
+//
+//     // Image baseImg = GenImageColor(8, 8, (Color){120, 64, 8, 255});
+//     return (PackedTexture) {0};
+// }
 
 
 BlockDef Blocks[] = {
-    (BlockDef) {
+    {
         .name = "Air",
         .texturePath = "NULL",
         .solid = false,
@@ -109,29 +109,29 @@ BlockDef Blocks[] = {
         .hardness = 0
 
     },
-    (BlockDef) {
+    {
         .name = "Dirt",
         .texturePath = "assets/blocks/dirt.png",
         .solid = true,
         .invisible = false,
         .hardness = 0.5
     },
-    (BlockDef) {
+    {
         .name = "Grass",
         .texturePath = "assets/blocks/grass.png",
         .solid = true,
         .invisible = false,
         .hardness = 1
     },
-    (BlockDef) {
+    {
         .invisible = true,
         .solid = true
     },
-    (BlockDef) {
+    {
         .invisible = true,
         .solid = true
     },
-    (BlockDef) {
+    {
         .invisible = true,
         .solid = true
     }
@@ -553,7 +553,7 @@ Tile* getTileReadOnly(i32 worldX, i32 worldY, ChunkMap* map) {
     return NULL;
 }
 
-void generateChunk(i32 x, i32 y, Chunk *chunk, ChunkMap *map, TableMeta *meta);
+void generateChunk(i32 x, i32 y, Chunk *chunk, TableMeta *meta);
 Tile *getTile(i32 x, i32 y, ChunkMap *map) {
     i32 cx = x >> 5;
     i32 cy = y >> 5;
@@ -600,14 +600,14 @@ void setTileFG(i32 x, i32 y, ChunkMap *map, u32 fg) {
         return; /* table full */
     }
     if (pair.meta->state == SLOT_FULL && !pair.meta->generated) {
-        generateChunk(cx, cy, pair.chunk, map, pair.meta);
+        generateChunk(cx, cy, pair.chunk, pair.meta);
     }
     pair.chunk->blocks[(localY * 32) + localX].bits.id = fg;
 
     pair.meta->dirty = true;
 }
 
-void generateChunk(i32 x, i32 y, Chunk *chunk, ChunkMap *map, TableMeta *meta) {
+void generateChunk(i32 x, i32 y, Chunk *chunk, TableMeta *meta) {
     struct stat buf;
     char fileName[50];
     snprintf(fileName, sizeof(fileName), CHUNK_LOAD, x, y);
@@ -691,7 +691,7 @@ void generateChunk(i32 x, i32 y, Chunk *chunk, ChunkMap *map, TableMeta *meta) {
                     chunk->bg[j * CHUNK_SIZE + i].data = stoneBg.data;
                 } else {
                     chunk->blocks[j * CHUNK_SIZE + i].data = lava.data;
-                    chunk->bg[j * CHUNK_SIZE + i].data = stoneBg.data;
+                    chunk->bg[j * CHUNK_SIZE + i].data = lavaBg.data;
                 }
             }
 
@@ -724,7 +724,7 @@ void updateChunks(ChunkMap *map, i32 x, i32 y, i32 renderDistChunks) {
                 chunk = pair.chunk;
                 meta = pair.meta;
 
-                generateChunk(i, j, chunk, map, meta);
+                generateChunk(i, j, chunk, meta);
             }
 
             if (chunk == NULL) {
@@ -749,7 +749,6 @@ void updateChunks(ChunkMap *map, i32 x, i32 y, i32 renderDistChunks) {
                     i32 worldTileX = i * CHUNK_SIZE + localBlockX;
                     i32 worldTileY = j * CHUNK_SIZE + localBlockY;
 
-                    u32 locFG = chunk->blocks[b].bits.id;
                     Tile* top = getTileReadOnly(worldTileX, worldTileY - 1, map);
                     if (top != NULL && Blocks[top->bits.id].solid) {
                         index |= 1;
@@ -904,7 +903,7 @@ HitboxBounds collisionDetectandResolve(Player *p, ChunkMap *map, bool drawDebug,
                         bool upTileSolid   = Blocks[getTile(x, y - 2, map)->bits.id].solid;
                         bool pTopTileSolid = Blocks[getTile(x - 1, y - 2, map)->bits.id].solid;
                         if (!upTileSolid && !pTopTileSolid) {
-                            p->y -= BLOCK_SIZE * 1.01;
+                            p->y -= BLOCK_SIZE * 1.01f;
                             resetVel = false;
                         }
                     }
@@ -917,7 +916,7 @@ HitboxBounds collisionDetectandResolve(Player *p, ChunkMap *map, bool drawDebug,
                             bool upTileSolid   = Blocks[getTile(x, y - 2, map)->bits.id].solid;
                             bool pTopTileSolid = Blocks[getTile(x + 1, y - 2, map)->bits.id].solid;
                             if (!upTileSolid && !pTopTileSolid) {
-                                p->y -= BLOCK_SIZE * 1.01;
+                                p->y -= BLOCK_SIZE * 1.01f;
                                 resetVel = false;
                             }
                         }
@@ -973,13 +972,8 @@ HitboxBounds collisionDetectandResolve(Player *p, ChunkMap *map, bool drawDebug,
     #undef CALC_BOUNDS
 }
 
-void damageTile(Tile *tile) {
-    // if (tile->bits.damage != 8)
-}
 void updatePlayer(Player *p, float dt, Camera *cam, ChunkMap *map, PackedTexture breakText) {
     bool drawDebug = IsKeyDown(KEY_GRAVE);
-
-    float mv = PLAYER_SPEED * dt;
 
     if (IsKeyDown(KEY_W) && p->grounded) {
         p->velY = -PLAYER_JUMP_FORCE;
@@ -991,7 +985,7 @@ void updatePlayer(Player *p, float dt, Camera *cam, ChunkMap *map, PackedTexture
 
     if (IsKeyReleased(KEY_W)) {
         p->grounded = false;
-        p->velY *= 0.5;
+        p->velY *= 0.5f;
     }
 
     if (p->jumpCounter < 0) p->grounded = false;
@@ -1106,7 +1100,7 @@ void updatePlayer(Player *p, float dt, Camera *cam, ChunkMap *map, PackedTexture
 
     p->lastBlockFocused = (Point) {mtx, mty};
 
-    DrawText(TextFormat("focus time: %f\n", p->focusTime), 10, 50, 20, BLACK);
+    DrawText(TextFormat("focus time: %.2f", (double)p->focusTime), 10, 50, 20, BLACK);
     #undef CALC_BOUNDS
 }
 
@@ -1199,11 +1193,10 @@ int initGame(Game *game) {
     }
 
     printf("loading block textures...\n");
-    for (int i = 0; i < (sizeof Blocks) / sizeof(*Blocks); i++)
+    for (size_t i = 0; i < (sizeof Blocks) / sizeof(*Blocks); i++)
         if (!Blocks[i].invisible) {
             Image ogImage = LoadImage(Blocks[i].texturePath);
             ImageResize(&ogImage, 8, 8);
-            Texture2D textureResult;
             Blocks[i].texture = LoadTextureFromImage(ogImage);
             UnloadImage(ogImage);
         }
@@ -1232,7 +1225,7 @@ int updateGame(Game *game) {
     updatePlayer(&game->player, dt, &game->camera, game->chunkMap, game->breakingTexture);
     drawPlayer(&game->player, &game->camera);
     DrawFPS(5, 5);
-    DrawText(TextFormat("DT MODIFER: %f", game->dtMod), 10, 500, 20, BLACK);
+    DrawText(TextFormat("DT MODIFER: %f", (double)game->dtMod), 10, 500, 20, BLACK);
     EndDrawing();
     return 1;
 }
