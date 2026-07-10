@@ -1,0 +1,90 @@
+[INFO] running in debug mode (default)
+[INFO] directory `build` already exists
+[INFO] CMD: cc -std=c99 -Wall -Wextra -Werror -pedantic -Wnull-dereference -Wwrite-strings -Wshadow -Wdouble-promotion -Wno-conversion -g -fsanitize=address,undefined src/main.c -o build/game
+src/main.c: In function ‘dirtTexture’:
+src/main.c:98:5: error: missing initializer for field ‘a’ of ‘Color’ [-Werror=missing-field-initializers]
+   98 |     Image baseImg = GenImageColor(8, 8, (Color){120, 64, 8});
+      |     ^~~~~
+In file included from src/main.c:2:
+/usr/include/raylib.h:251:19: note: ‘a’ declared here
+  251 |     unsigned char a;        // Color alpha value
+      |                   ^
+src/main.c:99:28: error: ISO C forbids empty initializer braces before C23 [-Werror=pedantic]
+   99 |     return (PackedTexture) {};
+      |                            ^
+src/main.c:98:11: error: unused variable ‘baseImg’ [-Werror=unused-variable]
+   98 |     Image baseImg = GenImageColor(8, 8, (Color){120, 64, 8});
+      |           ^~~~~~~
+src/main.c:92:44: error: unused parameter ‘variants’ [-Werror=unused-parameter]
+   92 | PackedTexture dirtTexture(Image *imgs, int variants) {
+      |                                        ~~~~^~~~~~~~
+src/main.c: At top level:
+src/main.c:104:5: error: initializer element is not constant [-Werror=pedantic]
+  104 |     (BlockDef) {
+      |     ^
+src/main.c:104:5: note: (near initialization for ‘Blocks[0]’)
+src/main.c:112:5: error: initializer element is not constant [-Werror=pedantic]
+  112 |     (BlockDef) {
+      |     ^
+src/main.c:112:5: note: (near initialization for ‘Blocks[1]’)
+src/main.c:119:5: error: initializer element is not constant [-Werror=pedantic]
+  119 |     (BlockDef) {
+      |     ^
+src/main.c:119:5: note: (near initialization for ‘Blocks[2]’)
+src/main.c:126:5: error: initializer element is not constant [-Werror=pedantic]
+  126 |     (BlockDef) {
+      |     ^
+src/main.c:126:5: note: (near initialization for ‘Blocks[3]’)
+src/main.c:130:5: error: initializer element is not constant [-Werror=pedantic]
+  130 |     (BlockDef) {
+      |     ^
+src/main.c:130:5: note: (near initialization for ‘Blocks[4]’)
+src/main.c:134:5: error: initializer element is not constant [-Werror=pedantic]
+  134 |     (BlockDef) {
+      |     ^
+src/main.c:134:5: note: (near initialization for ‘Blocks[5]’)
+src/main.c: In function ‘generateChunk’:
+src/main.c:666:12: error: variable ‘lavaBg’ set but not used [-Werror=unused-but-set-variable]
+  666 |         Bg lavaBg;
+      |            ^~~~~~
+src/main.c:610:58: error: unused parameter ‘map’ [-Werror=unused-parameter]
+  610 | void generateChunk(i32 x, i32 y, Chunk *chunk, ChunkMap *map, TableMeta *meta) {
+      |                                                ~~~~~~~~~~^~~
+src/main.c: In function ‘updateChunks’:
+src/main.c:752:25: error: unused variable ‘locFG’ [-Werror=unused-variable]
+  752 |                     u32 locFG = chunk->blocks[b].bits.id;
+      |                         ^~~~~
+src/main.c: In function ‘collisionDetectandResolve’:
+src/main.c:907:34: error: implicit conversion from ‘float’ to ‘double’ to match other operand of binary expression [-Werror=double-promotion]
+  907 |                             p->y -= BLOCK_SIZE * 1.01;
+      |                                  ^~
+src/main.c:920:38: error: implicit conversion from ‘float’ to ‘double’ to match other operand of binary expression [-Werror=double-promotion]
+  920 |                                 p->y -= BLOCK_SIZE * 1.01;
+      |                                      ^~
+src/main.c: In function ‘damageTile’:
+src/main.c:976:23: error: unused parameter ‘tile’ [-Werror=unused-parameter]
+  976 | void damageTile(Tile *tile) {
+      |                 ~~~~~~^~~~
+src/main.c: In function ‘updatePlayer’:
+src/main.c:994:17: error: implicit conversion from ‘float’ to ‘double’ to match other operand of binary expression [-Werror=double-promotion]
+  994 |         p->velY *= 0.5;
+      |                 ^~
+src/main.c:1109:46: error: implicit conversion from ‘float’ to ‘double’ when passing argument to function [-Werror=double-promotion]
+ 1109 |     DrawText(TextFormat("focus time: %f\n", p->focusTime), 10, 50, 20, BLACK);
+      |                                             ~^~~~~~~~~~~
+src/main.c:982:11: error: unused variable ‘mv’ [-Werror=unused-variable]
+  982 |     float mv = PLAYER_SPEED * dt;
+      |           ^~
+src/main.c: In function ‘initGame’:
+src/main.c:1202:23: error: comparison of integer expressions of different signedness: ‘int’ and ‘long unsigned int’ [-Werror=sign-compare]
+ 1202 |     for (int i = 0; i < (sizeof Blocks) / sizeof(*Blocks); i++)
+      |                       ^
+src/main.c:1206:23: error: unused variable ‘textureResult’ [-Werror=unused-variable]
+ 1206 |             Texture2D textureResult;
+      |                       ^~~~~~~~~~~~~
+src/main.c: In function ‘updateGame’:
+src/main.c:1235:47: error: implicit conversion from ‘float’ to ‘double’ when passing argument to function [-Werror=double-promotion]
+ 1235 |     DrawText(TextFormat("DT MODIFER: %f", game->dtMod), 10, 500, 20, BLACK);
+      |                                           ~~~~^~~~~~~
+cc1: all warnings being treated as errors
+[ERROR] command exited with exit code 1

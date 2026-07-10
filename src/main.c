@@ -14,6 +14,7 @@
 
 #define BASE_HEIGHT 200
 #define BLOCK_SIZE 16
+#define HALF_BLOCK_SIZE BLOCK_SIZE / 2.0f
 
 #define CLAMP(val, min, max) \
     ((val) < (min) ? (min) : ((val) > (max) ? (max) : (val)))
@@ -25,7 +26,10 @@
 
 #define SEED 67
 
-#define CHUNK_MNGR_ACTIVE_CHUNKS_SIZE 16
+#define BREAKING_ANIM_SEED 4
+#define BREAKING_ANIM_FRAMECOUNT 8
+
+#define CHUNK_MNGR_ACTIVE_CHUNKS_SIZE 32
 
 #define PLAYER_SPEED 700
 #define PLAYER_JUMP_FORCE 400
@@ -92,7 +96,7 @@ PackedTexture dirtTexture(Image *imgs, int variants) {
     }
 
     Image baseImg = GenImageColor(8, 8, (Color){120, 64, 8});
-
+    return (PackedTexture) {};
 }
 
 
@@ -102,6 +106,8 @@ BlockDef Blocks[] = {
         .texturePath = "NULL",
         .solid = false,
         .invisible = true,
+        .hardness = 0
+
     },
     (BlockDef) {
         .name = "Dirt",
@@ -118,13 +124,16 @@ BlockDef Blocks[] = {
         .hardness = 1
     },
     (BlockDef) {
-        .invisible = true
+        .invisible = true,
+        .solid = true
     },
     (BlockDef) {
-        .invisible = true
+        .invisible = true,
+        .solid = true
     },
     (BlockDef) {
-        .invisible = true
+        .invisible = true,
+        .solid = true
     }
 };
 
@@ -151,8 +160,20 @@ typedef struct Point {
     i32 x; i32 y;
 } Point;
 
+typedef struct PointF {
+    float x; float y;
+} PointF;
+
 float distance(Point a, Point b) {
     return sqrt((a.x - b.x) * (a.x - b.x) + (a.y - b.y) * (a.y - b.y));
+}
+
+float distanceF(PointF a, PointF b) {
+    return sqrt((a.x - b.x) * (a.x - b.x) + (a.y - b.y) * (a.y - b.y));
+}
+
+float manhattanDistance(PointF p1, PointF p2) {
+    return fabsf(p1.x - p2.x) + fabsf(p1.y - p2.y);
 }
 
 Point globalToBlock(i32 x, i32 y) {
@@ -750,7 +771,7 @@ void updateChunks(ChunkMap *map, i32 x, i32 y, i32 renderDistChunks) {
                     }
 
                     Rectangle dest = {.x = (index * 8) % 32,
-                                      .y = ((index * 8) / 32) * 8,
+                                      .y = ((float)(index * 8) / 32) * 8,
                                       .width = 8, .height = 8};
 
                     DrawTexturePro(Blocks[chunk->blocks[b].bits.id].texture,
@@ -880,8 +901,12 @@ HitboxBounds collisionDetectandResolve(Player *p, ChunkMap *map, bool drawDebug,
                         y * BLOCK_SIZE > p->y &&
                         p->onGround
                     ) {
-                        p->y -= BLOCK_SIZE * 1.01;
-                        resetVel = false;
+                        bool upTileSolid   = Blocks[getTile(x, y - 2, map)->bits.id].solid;
+                        bool pTopTileSolid = Blocks[getTile(x - 1, y - 2, map)->bits.id].solid;
+                        if (!upTileSolid && !pTopTileSolid) {
+                            p->y -= BLOCK_SIZE * 1.01;
+                            resetVel = false;
+                        }
                     }
                 } else if (p->velX < 0) { /* Moving Left */
                         p->x = (x + 1) * BLOCK_SIZE - p->hb.x;
@@ -889,8 +914,12 @@ HitboxBounds collisionDetectandResolve(Player *p, ChunkMap *map, bool drawDebug,
                             y * BLOCK_SIZE > p->y &&
                             p->onGround
                         ) {
-                            p->y -= BLOCK_SIZE * 1.01;
-                        resetVel = false;
+                            bool upTileSolid   = Blocks[getTile(x, y - 2, map)->bits.id].solid;
+                            bool pTopTileSolid = Blocks[getTile(x + 1, y - 2, map)->bits.id].solid;
+                            if (!upTileSolid && !pTopTileSolid) {
+                                p->y -= BLOCK_SIZE * 1.01;
+                                resetVel = false;
+                            }
                         }
                 }
                 int screenX = (x * BLOCK_SIZE) - (int)cam->x + (HALF_SCREEN_W);
@@ -947,7 +976,7 @@ HitboxBounds collisionDetectandResolve(Player *p, ChunkMap *map, bool drawDebug,
 void damageTile(Tile *tile) {
     // if (tile->bits.damage != 8)
 }
-void updatePlayer(Player *p, float dt, Camera *cam, ChunkMap *map) {
+void updatePlayer(Player *p, float dt, Camera *cam, ChunkMap *map, PackedTexture breakText) {
     bool drawDebug = IsKeyDown(KEY_GRAVE);
 
     float mv = PLAYER_SPEED * dt;
@@ -966,7 +995,6 @@ void updatePlayer(Player *p, float dt, Camera *cam, ChunkMap *map) {
     }
 
     if (p->jumpCounter < 0) p->grounded = false;
-
 
     /* apply gravity */
     if (p->velY < 0) {
@@ -1000,19 +1028,6 @@ void updatePlayer(Player *p, float dt, Camera *cam, ChunkMap *map) {
     i32 mx = GetMouseX();
     i32 my = GetMouseY();
 
-    // float distanceToPlayer = distance((Point){p->x, p->y}, (Point){cam->x, cam->y});
-    // if (distanceToPlayer < 0.01f && distanceToPlayer > -0.01f) {
-    //     float ratio = (CAMERA_SPEED * dt) / distanceToPlayer;
-    //     cam->x += (p->x - cam->x) * ratio;
-    //     cam->y += (p->y - cam->y) * ratio;
-    // } else {
-    //     cam->x = p->x;
-    //     cam->y = p->y;
-    // }
-
-    // printf("cam x: %f\n", cam->x);
-    // printf("cam y: %f\n", cam->y);
-
     cam->x = p->x + (int)(mx - HALF_SCREEN_W) * 0.5f;
     cam->y = p->y + (int)(my - HALF_SCREEN_H) * 0.5f;
 
@@ -1026,14 +1041,26 @@ void updatePlayer(Player *p, float dt, Camera *cam, ChunkMap *map) {
     i32 tileScreenY = (mty * BLOCK_SIZE) - cam->y + (float)HALF_SCREEN_H;
 
     if (distance((Point){mtx, mty},
-                 (Point){(int)floor(p->x / BLOCK_SIZE), (int)floor(p->y / BLOCK_SIZE)}) > 5)
+                 (Point){(int)floor(p->x / BLOCK_SIZE), (int)floor(p->y / BLOCK_SIZE)}) > 20)
         return;
 
     Tile *mTile       =   getTile(mtx, mty, map);
     Bg   *mBackground = getBgTile(mtx, mty, map);
 
-    DrawRectangle(tileScreenX, tileScreenY, BLOCK_SIZE, BLOCK_SIZE,
-                  (Color){11, 11, 11, 255 * p->focusTime / Blocks[mTile->bits.id].hardness});
+    // DrawRectangle(tileScreenX, tileScreenY, BLOCK_SIZE, BLOCK_SIZE,
+    //               (Color){11, 11, 11, 255 * p->focusTime / Blocks[mTile->bits.id].hardness});
+
+    if (p->focusTime > 0) {
+        float hardness = Blocks[mTile->bits.id].hardness;
+
+        if (hardness > 0.0f) {
+            int ind = (p->focusTime / Blocks[mTile->bits.id].hardness) * breakText.numVariants;
+            DrawText(TextFormat("IND: %d", ind),  40, 400, 30, BLACK);
+            printf("index %d\n", ind);
+            Texture2D toDraw = breakText.texture[ind];
+            DrawTexture(toDraw, tileScreenX, tileScreenY, WHITE);
+        }
+    }
 
     if (mTile != NULL) {
         if (IsMouseButtonDown(MOUSE_BUTTON_LEFT)) {
@@ -1095,6 +1122,8 @@ typedef struct Game {
     Camera camera;
     ChunkMap *chunkMap;
     Player player;
+    float dtMod;
+    PackedTexture breakingTexture;
     int (*init)(struct Game *game);
     int (*update)(struct Game *game);
     int (*end)(struct Game *game);
@@ -1111,7 +1140,55 @@ int runGame(Game game) {
     return game.end(&game);
 }
 
+PackedTexture generateBreakingTextures(i32 seed, Texture2D *text, i32 frames) {
+    if (text == NULL) {
+        CRITICAL_ERROR("null pointer passed")
+        exit(1);
+    }
+
+    Image base = GenImageColor(BLOCK_SIZE, BLOCK_SIZE, BLANK);
+    for (int x = 0; x < base.width; x++) {
+        for (int y = 0; y < base.height; y++) {
+            double noise = noise_2d(x * 0.2, y * 0.2, seed);
+            if (noise < 0.1 && noise > -0.1)
+                ImageDrawPixel(&base, x, y, (Color) {0, 0, 0, 255});
+        }
+    }
+
+    Image workingImg = GenImageColor(BLOCK_SIZE, BLOCK_SIZE, BLANK);
+    for (int i = 0; i < frames; i++) {
+        for (int x = 0; x < base.width; x++) {
+            for (int y = 0; y < base.height; y++) {
+                PointF curP = {x, y};
+                PointF cenP = {HALF_BLOCK_SIZE, HALF_BLOCK_SIZE};
+                float threshold = BLOCK_SIZE * ((float)i + 1) / frames;
+                if (fabsf(manhattanDistance(curP, cenP)) < threshold) {
+                    ImageDrawPixel(&workingImg, x, y, GetImageColor(base, x, y));
+                }
+            }
+        }
+        text[i] = LoadTextureFromImage(workingImg);
+    }
+
+    UnloadImage(workingImg);
+    UnloadImage(base);
+    return (PackedTexture) {
+        .texture = text,
+        .numVariants = frames,
+    };
+}
 int initGame(Game *game) {
+    game->dtMod = 1.0f;
+
+    InitWindow(1920, 1080, "random block game idk bro");
+    SetConfigFlags(FLAG_FULLSCREEN_MODE);
+
+    game->breakingTexture.texture     = malloc(sizeof(Texture2D) * BREAKING_ANIM_FRAMECOUNT);
+    game->breakingTexture.numVariants = BREAKING_ANIM_FRAMECOUNT;
+    generateBreakingTextures(BREAKING_ANIM_SEED,
+                             game->breakingTexture.texture,
+                             BREAKING_ANIM_FRAMECOUNT);
+
     game->camera.x = 10;
     game->camera.y = 10;
 
@@ -1121,18 +1198,15 @@ int initGame(Game *game) {
       exit(1);
     }
 
-    InitWindow(1920, 1080, "random block game idk bro");
-    SetConfigFlags(FLAG_FULLSCREEN_MODE);
-
     printf("loading block textures...\n");
     for (int i = 0; i < (sizeof Blocks) / sizeof(*Blocks); i++)
-            if (!Blocks[i].invisible) {
-                Image ogImage = LoadImage(Blocks[i].texturePath);
-                ImageResize(&ogImage, 8, 8);
-                Texture2D textureResult;
-                Blocks[i].texture = LoadTextureFromImage(ogImage);
-                UnloadImage(ogImage);
-            }
+        if (!Blocks[i].invisible) {
+            Image ogImage = LoadImage(Blocks[i].texturePath);
+            ImageResize(&ogImage, 8, 8);
+            Texture2D textureResult;
+            Blocks[i].texture = LoadTextureFromImage(ogImage);
+            UnloadImage(ogImage);
+        }
     printf("done loading block textures\n");
 
     return 0;
@@ -1147,18 +1221,25 @@ int updateGame(Game *game) {
 
     float dt = GetFrameTime();
 
+    if (IsKeyDown(KEY_UP))   game->dtMod += 1 * dt;
+    if (IsKeyDown(KEY_DOWN)) game->dtMod -= 1 * dt;
+
+    dt *= game->dtMod;
+
     BeginDrawing();
     ClearBackground(SKYBLUE);
     updateChunks(game->chunkMap, game->camera.x, game->camera.y, 2);
-    updatePlayer(&game->player, dt, &game->camera, game->chunkMap);
+    updatePlayer(&game->player, dt, &game->camera, game->chunkMap, game->breakingTexture);
     drawPlayer(&game->player, &game->camera);
     DrawFPS(5, 5);
+    DrawText(TextFormat("DT MODIFER: %f", game->dtMod), 10, 500, 20, BLACK);
     EndDrawing();
     return 1;
 }
 
 int endGame(Game *game) {
     free(game->chunkMap);
+    free(game->breakingTexture.texture);
     CloseWindow();
     return 0;
 }
@@ -1171,3 +1252,4 @@ int main() {
     runGame(game);
     return 0;
 }
+
