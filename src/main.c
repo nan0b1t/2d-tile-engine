@@ -879,93 +879,105 @@ HitboxBounds collisionDetectandResolve(Player *p, ChunkMap *map, bool drawDebug,
     } while (0)
 
     /* X MOVEMENT */
-    p->x += p->velX * dt;
+    float totalMovement = p->velX * dt;
+    float totalMovementAbs = fabsf(p->velX * dt);
+    while (totalMovementAbs > 0.0f) {
+        float movement = MAX(MIN(BLOCK_SIZE, totalMovement), -BLOCK_SIZE);
+        p->x += movement;
+        totalMovementAbs -= fabsf(movement);
 
-    CALC_BOUNDS;
+        CALC_BOUNDS;
 
-    if (p->onGround)
-        DrawText("ON GROUND", 5, 50, 10, RED);
-    else
-        DrawText("ON GROUND", 5, 50, 10, RED);
+        if (p->onGround)
+            DrawText("ON GROUND", 5, 50, 10, RED);
+        else
+            DrawText("ON GROUND", 5, 50, 10, RED);
 
-    for (int y = minY; y <= maxY; y++) {
-        for (int x = minX; x <= maxX; x++) {
-            Tile *t = getTile(x, y, map);
-            bool resetVel = true;
+        for (int y = minY; y <= maxY; y++) {
+            for (int x = minX; x <= maxX; x++) {
+                Tile *t = getTile(x, y, map);
+                bool resetVel = true;
 
-            if (t != NULL && t->bits.id != 0) {
-                if (p->velX > 0) { /* Moving Right */
-                    p->x = x * BLOCK_SIZE - p->hb.w - p->hb.x /* - EPSILON */;
-                    if (!Blocks[getTile(x, y - 1, map)->bits.id].solid &&
-                        y * BLOCK_SIZE > p->y &&
-                        p->onGround
-                    ) {
-                        bool upTileSolid   = Blocks[getTile(x, y - 2, map)->bits.id].solid;
-                        bool pTopTileSolid = Blocks[getTile(x - 1, y - 2, map)->bits.id].solid;
-                        if (!upTileSolid && !pTopTileSolid) {
-                            p->y -= BLOCK_SIZE * 1.01f;
-                            resetVel = false;
-                        }
-                    }
-                } else if (p->velX < 0) { /* Moving Left */
-                        p->x = (x + 1) * BLOCK_SIZE - p->hb.x;
+                if (t != NULL && t->bits.id != 0) {
+                    if (p->velX > 0) { /* Moving Right */
+                        p->x = x * BLOCK_SIZE - p->hb.w - p->hb.x /* - EPSILON */;
                         if (!Blocks[getTile(x, y - 1, map)->bits.id].solid &&
                             y * BLOCK_SIZE > p->y &&
                             p->onGround
                         ) {
                             bool upTileSolid   = Blocks[getTile(x, y - 2, map)->bits.id].solid;
-                            bool pTopTileSolid = Blocks[getTile(x + 1, y - 2, map)->bits.id].solid;
+                            bool pTopTileSolid = Blocks[getTile(x - 1, y - 2, map)->bits.id].solid;
                             if (!upTileSolid && !pTopTileSolid) {
                                 p->y -= BLOCK_SIZE * 1.01f;
                                 resetVel = false;
                             }
                         }
+                    } else if (p->velX < 0) { /* Moving Left */
+                            p->x = (x + 1) * BLOCK_SIZE - p->hb.x;
+                            if (!Blocks[getTile(x, y - 1, map)->bits.id].solid &&
+                                y * BLOCK_SIZE > p->y &&
+                                p->onGround
+                            ) {
+                                bool upTileSolid   = Blocks[getTile(x, y - 2, map)->bits.id].solid;
+                                bool pTopTileSolid = Blocks[getTile(x + 1, y - 2, map)->bits.id].solid;
+                                if (!upTileSolid && !pTopTileSolid) {
+                                    p->y -= BLOCK_SIZE * 1.01f;
+                                    resetVel = false;
+                                }
+                            }
+                    }
+                    int screenX = (x * BLOCK_SIZE) - (int)cam->x + (HALF_SCREEN_W);
+                    int screenY = (y * BLOCK_SIZE) - (int)cam->y + (HALF_SCREEN_H);
+
+                    if (drawDebug)
+                        DrawRectangle(screenX, screenY, BLOCK_SIZE, BLOCK_SIZE, (Color){ 255, 0, 0, 100 });
+
+                    if (resetVel)
+                        p->velX = 0;
+                    goto endx;
                 }
-                int screenX = (x * BLOCK_SIZE) - (int)cam->x + (HALF_SCREEN_W);
-                int screenY = (y * BLOCK_SIZE) - (int)cam->y + (HALF_SCREEN_H);
-
-                if (drawDebug)
-                    DrawRectangle(screenX, screenY, BLOCK_SIZE, BLOCK_SIZE, (Color){ 255, 0, 0, 100 });
-
-                if (resetVel)
-                    p->velX = 0;
-                goto endx;
             }
         }
     }
     endx:
 
     /* Y MOVEMENT */
-    p->y += p->velY * dt;
+    totalMovement = p->velY * dt;
+    totalMovementAbs = fabsf(p->velY * dt);
+    while (totalMovementAbs > 0.0f) {
+        float movement = MAX(MIN(BLOCK_SIZE, totalMovement), -BLOCK_SIZE);
+        p->y += movement;
+        totalMovementAbs -= fabsf(movement);
 
-    CALC_BOUNDS;
+        CALC_BOUNDS;
 
-    p->onGround = false;
-    for (int y = minY; y <= maxY; y++) {
-        for (int x = minX; x <= maxX; x++) {
-            Tile *t = getTile(x, y, map);
+        p->onGround = false;
+        for (int y = minY; y <= maxY; y++) {
+            for (int x = minX; x <= maxX; x++) {
+                Tile *t = getTile(x, y, map);
 
-            if (t != NULL && t->bits.id != 0) {
-                if (p->velY > 0) { /* moving down */
-                    p->y = y * BLOCK_SIZE - p->hb.h - p->hb.y /*- EPSILON*/;
-                    p->grounded = true;
-                    p->hasJumped = false;
-                    p->onGround = true;
-                } else if (p->velY < 0) { /* moving up */
-                    p->y = (y + 1) * BLOCK_SIZE - p->hb.y;
-                    p->onGround = false;
+                if (t != NULL && t->bits.id != 0) {
+                    if (p->velY > 0) { /* moving down */
+                        p->y = y * BLOCK_SIZE - p->hb.h - p->hb.y /*- EPSILON*/;
+                        p->grounded = true;
+                        p->hasJumped = false;
+                        p->onGround = true;
+                    } else if (p->velY < 0) { /* moving up */
+                        p->y = (y + 1) * BLOCK_SIZE - p->hb.y;
+                        p->onGround = false;
+                    }
+                    p->velY = 0;
+
+                    int screenX = (x * BLOCK_SIZE) - (int)cam->x + (HALF_SCREEN_W);
+                    int screenY = (y * BLOCK_SIZE) - (int)cam->y + (HALF_SCREEN_H);
+                    if (drawDebug)
+                        DrawRectangle(screenX, screenY, BLOCK_SIZE, BLOCK_SIZE, (Color){255, 0, 0, 100});
+                    goto endy;
                 }
-                p->velY = 0;
-
-                int screenX = (x * BLOCK_SIZE) - (int)cam->x + (HALF_SCREEN_W);
-                int screenY = (y * BLOCK_SIZE) - (int)cam->y + (HALF_SCREEN_H);
-                if (drawDebug)
-                    DrawRectangle(screenX, screenY, BLOCK_SIZE, BLOCK_SIZE, (Color){255, 0, 0, 100});
-                goto endy;
             }
         }
     }
-    endy: ;
+    endy:
 
     CALC_BOUNDS;
     return (HitboxBounds){left, right, top, bottom};
@@ -1016,14 +1028,18 @@ void updatePlayer(Player *p, float dt, Camera *cam, ChunkMap *map, PackedTexture
     if (p->velX >  PLAYER_MAX_SPEED) p->velX =  PLAYER_MAX_SPEED;
     if (p->velX < -PLAYER_MAX_SPEED) p->velX = -PLAYER_MAX_SPEED;
 
+    if (IsKeyDown(KEY_SPACE))
+        // orbital strike
+        p->velY = 99999.0f;
+
     /* collision detection */
     HitboxBounds pBounds = collisionDetectandResolve(p, map, drawDebug, cam, dt);
 
     i32 mx = GetMouseX();
     i32 my = GetMouseY();
 
-    cam->x = p->x + (int)(mx - HALF_SCREEN_W) * 0.5f;
-    cam->y = p->y + (int)(my - HALF_SCREEN_H) * 0.5f;
+    cam->x = p->x/* + (int)(mx - HALF_SCREEN_W) * 0.5f*/;
+    cam->y = p->y/* + (int)(my - HALF_SCREEN_H) * 0.5f*/;
 
     i32 mouseWorldX = mx + cam->x - (float)HALF_SCREEN_W;
     i32 mouseWorldY = my + cam->y - (float)HALF_SCREEN_H;
@@ -1050,7 +1066,6 @@ void updatePlayer(Player *p, float dt, Camera *cam, ChunkMap *map, PackedTexture
         if (hardness > 0.0f) {
             int ind = (p->focusTime / Blocks[mTile->bits.id].hardness) * breakText.numVariants;
             DrawText(TextFormat("IND: %d", ind),  40, 400, 30, BLACK);
-            printf("index %d\n", ind);
             Texture2D toDraw = breakText.texture[ind];
             DrawTexture(toDraw, tileScreenX, tileScreenY, WHITE);
         }
@@ -1221,7 +1236,7 @@ int updateGame(Game *game) {
 
     BeginDrawing();
     ClearBackground(SKYBLUE);
-    updateChunks(game->chunkMap, game->camera.x, game->camera.y, 2);
+    updateChunks(game->chunkMap, game->camera.x, game->camera.y, 3);
     updatePlayer(&game->player, dt, &game->camera, game->chunkMap, game->breakingTexture);
     drawPlayer(&game->player, &game->camera);
     DrawFPS(5, 5);
