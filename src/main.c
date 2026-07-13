@@ -4,6 +4,7 @@
 #include "nums.h"
 #include "stdlib.h"
 #include <sys/stat.h>
+#include <assert.h>
 #include <math.h>
 #include <stdio.h>
 
@@ -67,6 +68,70 @@
 #endif
 
 int frame = 0;
+
+typedef struct Position {
+    i32 cx, cy;
+    float lx, ly;
+} Position;
+
+typedef struct Vec2f {
+    float x, y;
+} Vec2f;
+
+static inline void posAssValid(Position p) {
+    assert(p.lx >= 0.0f);
+    assert(p.ly >= 0.0f);
+    assert(p.lx < CHUNK_SIZE);
+    assert(p.ly < CHUNK_SIZE);
+}
+
+static inline Position posNormalize(Position p) {
+    float fx = floorf(p.lx / CHUNK_SIZE);
+    p.cx += (i32)fx;
+    p.lx -= fx * CHUNK_SIZE;
+
+    float fy = floorf(p.ly / CHUNK_SIZE);
+    p.cy += (i32)fy;
+    p.ly -= fy * CHUNK_SIZE;
+
+    return p;
+}
+
+static inline Position makePos(i32 cx, i32 cy, float lx, float ly) {
+    Position p = {cx, cy, lx, ly};
+    return posNormalize(p);
+}
+
+static inline Position changePos(Position p, float dx, float dy) {
+    p.lx += dx;
+    p.ly += dy;
+
+    return posNormalize(p);
+}
+
+static inline Vec2f posDelta(Position a, Position b) {
+    return (Vec2f){
+        (float)(a.cx - b.cx) * CHUNK_SIZE + (a.lx - b.lx),
+        (float)(a.cy - b.cy) * CHUNK_SIZE + (a.ly - b.ly),
+    };
+}
+
+static inline float posDist(Position a, Position b) {
+    Vec2f sub = posDelta(a, b);
+    return sqrtf(sub.x * sub.x + sub.y * sub.y);
+}
+
+static inline bool posSameChunk(Position a, Position b) {
+    return (a.cx == b.cx) && (a.cy == b.cy);
+}
+
+static inline float posGetAbsY(Position p) {
+    return p.cy * CHUNK_SIZE + p.ly;
+}
+
+static inline float posGetAbsX(Position p) {
+    return p.cx * CHUNK_SIZE + p.lx;
+}
 
 typedef struct PackedTexture {
     Texture2D *texture;
@@ -416,22 +481,21 @@ void collectGarbage(ChunkMap *chunkMap, i32 playerX, i32 playerY, i32 renderDist
 /* ==============================================================================================*/
 
 typedef struct {
-    float x;
-    float y;
+    Position pos;
 } Camera;
 
 Point localToWorld(i32 x, i32 y, Camera camera) {
     return (Point) {
-        .x = x + camera.x,
-        .y = y + camera.y
+        .x = x + posGetAbsX(camera.pos),
+        .y = y + posGetAbsY(camera.pos)
     };
 }
 
 Point localToBlock(i32 x, i32 y, Camera camera) {
-    x = x + (int)camera.x % BLOCK_SIZE;
+    x = x + (int)posGetAbsX(camera.pos) % BLOCK_SIZE;
     if (x < 0) x += BLOCK_SIZE;
 
-    y = y + (int)camera.y % BLOCK_SIZE;
+    y = y + (int)posGetAbsY(camera.pos) % BLOCK_SIZE;
     if (y < 0) y += BLOCK_SIZE;
 
     return (Point) {
@@ -486,10 +550,10 @@ void hash_2d(int32_t x, int32_t y, int32_t seed, double* out_gx, double* out_gy)
     state ^= state >> 16;
 
     switch (state & 3) {
-        case 0: *out_gx =  1.0; *out_gy =  1.0; break;
-        case 1: *out_gx = -1.0; *out_gy =  1.0; break;
-        case 2: *out_gx =  1.0; *out_gy = -1.0; break;
-        case 3: *out_gx = -1.0; *out_gy = -1.0; break;
+    case 0: *out_gx =  1.0; *out_gy =  1.0; break;
+    case 1: *out_gx = -1.0; *out_gy =  1.0; break;
+    case 2: *out_gx =  1.0; *out_gy = -1.0; break;
+    case 3: *out_gx = -1.0; *out_gy = -1.0; break;
     }
 }
 
@@ -614,7 +678,6 @@ void generateChunk(i32 x, i32 y, Chunk *chunk, TableMeta *meta) {
     if (stat(fileName, &buf) == 0) {
         FILE *fp = fopen(fileName, "rb");
         fread(chunk, sizeof(Chunk), 1, fp);
-        // printf("reading file on frame :%d\n", frame);
         fclose(fp);
         meta->dirty = false;
         meta->generated = true;
@@ -788,23 +851,23 @@ void updateChunks(ChunkMap *map, i32 x, i32 y, i32 renderDistChunks) {
 
                 if (!drewFG) {
                     switch (chunk->bg[b].bits.id) {
-                        case 1: ;
-                            DrawRectangle(drawX, drawY,
-                                          BLOCK_SIZE, BLOCK_SIZE,
-                                          (Color) {.r = 150 * 0.5, .g = 75 * 0.5, .b = 0 * 0.5, .a = 255});
-                            break;
+                    case 1: ;
+                        DrawRectangle(drawX, drawY,
+                                      BLOCK_SIZE, BLOCK_SIZE,
+                                      (Color) {.r = 150 * 0.5, .g = 75 * 0.5, .b = 0 * 0.5, .a = 255});
+                        break;
 
-                        case 2:
-                            DrawRectangle(drawX, drawY,
-                                          BLOCK_SIZE, BLOCK_SIZE,
-                                          (Color) {.r = 124 * 0.5, .g = 189 * 0.5, .b = 107 * 0.5, .a = 255});
-                            break;
+                    case 2:
+                        DrawRectangle(drawX, drawY,
+                                      BLOCK_SIZE, BLOCK_SIZE,
+                                      (Color) {.r = 124 * 0.5, .g = 189 * 0.5, .b = 107 * 0.5, .a = 255});
+                        break;
 
-                        case 3:
-                            DrawRectangle(drawX, drawY,
-                                          BLOCK_SIZE, BLOCK_SIZE,
-                                          (Color) {.r = 149 * 0.5, .g = 150 * 0.5, .b = 149 * 0.5, .a = 255});
-                            break;
+                    case 3:
+                        DrawRectangle(drawX, drawY,
+                                      BLOCK_SIZE, BLOCK_SIZE,
+                                      (Color) {.r = 149 * 0.5, .g = 150 * 0.5, .b = 149 * 0.5, .a = 255});
+                        break;
                     }
                 }
             }
@@ -842,8 +905,8 @@ typedef struct {
 
 typedef struct Player {
     Hitbox hb;
+    Position pos;
     float  velX, velY;
-    float  x, y;
     float  jumpCounter;
     float  focusTime;
     Point  lastBlockFocused;
@@ -867,10 +930,10 @@ HitboxBounds collisionDetectandResolve(Player *p, ChunkMap *map, bool drawDebug,
     int minX, maxX, minY, maxY;
 
     #define CALC_BOUNDS do { \
-        left = p->x + p->hb.x; \
-        right  = p->x + p->hb.x + p->hb.w - EPSILON; \
-        top    = p->y + p->hb.y; \
-        bottom = p->y + p->hb.y + p->hb.h - EPSILON; \
+        left   = posGetAbsX(p->pos) + p->hb.x; \
+        right  = posGetAbsX(p->pos) + p->hb.x + p->hb.w - EPSILON; \
+        top    = posGetAbsY(p->pos) + p->hb.y; \
+        bottom = posGetAbsY(p->pos) + p->hb.y + p->hb.h - EPSILON; \
         \
         minX = (int)floor(left / BLOCK_SIZE); \
         maxX = (int)floor(right / BLOCK_SIZE); \
@@ -879,93 +942,111 @@ HitboxBounds collisionDetectandResolve(Player *p, ChunkMap *map, bool drawDebug,
     } while (0)
 
     /* X MOVEMENT */
-    p->x += p->velX * dt;
+    float totalMovement = p->velX * dt;
+    float totalMovementAbs = fabsf(p->velX * dt);
+    while (totalMovementAbs > 0.0f) {
+        float movement = MAX(MIN(BLOCK_SIZE, totalMovement), -BLOCK_SIZE);
+        p->pos = changePos(p->pos, movement, 0.0f);
+        totalMovementAbs -= fabsf(movement);
 
-    CALC_BOUNDS;
+        CALC_BOUNDS;
 
-    if (p->onGround)
-        DrawText("ON GROUND", 5, 50, 10, RED);
-    else
-        DrawText("ON GROUND", 5, 50, 10, RED);
+        for (int y = minY; y <= maxY; y++) {
+            for (int x = minX; x <= maxX; x++) {
+                Tile *t = getTile(x, y, map);
+                bool resetVel = true;
 
-    for (int y = minY; y <= maxY; y++) {
-        for (int x = minX; x <= maxX; x++) {
-            Tile *t = getTile(x, y, map);
-            bool resetVel = true;
+                if (t != NULL && t->bits.id != 0) {
+                    if (p->velX > 0) { /* Moving Right */
+                        int newx = x * BLOCK_SIZE - p->hb.w - p->hb.x;
+                        p->pos = posNormalize((Position){.cx = 0, .cy = p->pos.cy,
+                                                         .lx = (float) newx, .ly = p->pos.ly});
 
-            if (t != NULL && t->bits.id != 0) {
-                if (p->velX > 0) { /* Moving Right */
-                    p->x = x * BLOCK_SIZE - p->hb.w - p->hb.x /* - EPSILON */;
-                    if (!Blocks[getTile(x, y - 1, map)->bits.id].solid &&
-                        y * BLOCK_SIZE > p->y &&
-                        p->onGround
-                    ) {
-                        bool upTileSolid   = Blocks[getTile(x, y - 2, map)->bits.id].solid;
-                        bool pTopTileSolid = Blocks[getTile(x - 1, y - 2, map)->bits.id].solid;
-                        if (!upTileSolid && !pTopTileSolid) {
-                            p->y -= BLOCK_SIZE * 1.01f;
-                            resetVel = false;
-                        }
-                    }
-                } else if (p->velX < 0) { /* Moving Left */
-                        p->x = (x + 1) * BLOCK_SIZE - p->hb.x;
                         if (!Blocks[getTile(x, y - 1, map)->bits.id].solid &&
-                            y * BLOCK_SIZE > p->y &&
+                            y * BLOCK_SIZE > posGetAbsY(p->pos) &&
                             p->onGround
                         ) {
                             bool upTileSolid   = Blocks[getTile(x, y - 2, map)->bits.id].solid;
-                            bool pTopTileSolid = Blocks[getTile(x + 1, y - 2, map)->bits.id].solid;
+                            bool pTopTileSolid = Blocks[getTile(x - 1, y - 2, map)->bits.id].solid;
                             if (!upTileSolid && !pTopTileSolid) {
-                                p->y -= BLOCK_SIZE * 1.01f;
+                                p->pos = changePos(p->pos, 0, -(BLOCK_SIZE * 1.01f));
                                 resetVel = false;
                             }
                         }
+                    } else if (p->velX < 0) { /* Moving Left */
+                            int newx = (x + 1) * BLOCK_SIZE - p->hb.x;
+                            p->pos = posNormalize((Position){.cx = 0, .cy = p->pos.cy,
+                                                             .lx = (float) newx, .ly = p->pos.ly});
+
+                            if (!Blocks[getTile(x, y - 1, map)->bits.id].solid &&
+                                y * BLOCK_SIZE > posGetAbsY(p->pos) &&
+                                p->onGround
+                            ) {
+                                bool upTileSolid   = Blocks[getTile(x, y - 2, map)->bits.id].solid;
+                                bool pTopTileSolid = Blocks[getTile(x + 1, y - 2, map)->bits.id].solid;
+                                if (!upTileSolid && !pTopTileSolid) {
+                                    p->pos = changePos(p->pos, 0, -(BLOCK_SIZE * 1.01f));
+                                    resetVel = false;
+                                }
+                            }
+                    }
+                    int screenX = (x * BLOCK_SIZE) - (int)posGetAbsX(cam->pos) + (HALF_SCREEN_W);
+                    int screenY = (y * BLOCK_SIZE) - (int)posGetAbsY(cam->pos) + (HALF_SCREEN_H);
+
+                    if (drawDebug)
+                        DrawRectangle(screenX, screenY, BLOCK_SIZE, BLOCK_SIZE, (Color){ 255, 0, 0, 100 });
+
+                    if (resetVel)
+                        p->velX = 0;
+                    goto endx;
                 }
-                int screenX = (x * BLOCK_SIZE) - (int)cam->x + (HALF_SCREEN_W);
-                int screenY = (y * BLOCK_SIZE) - (int)cam->y + (HALF_SCREEN_H);
-
-                if (drawDebug)
-                    DrawRectangle(screenX, screenY, BLOCK_SIZE, BLOCK_SIZE, (Color){ 255, 0, 0, 100 });
-
-                if (resetVel)
-                    p->velX = 0;
-                goto endx;
             }
         }
     }
     endx:
 
     /* Y MOVEMENT */
-    p->y += p->velY * dt;
+    totalMovement = p->velY * dt;
+    totalMovementAbs = fabsf(p->velY * dt);
+    while (totalMovementAbs > 0.0f) {
+        float movement = MAX(MIN(BLOCK_SIZE, totalMovement), -BLOCK_SIZE);
+        p->pos = changePos(p->pos, 0.0f, movement);
 
-    CALC_BOUNDS;
+        totalMovementAbs -= fabsf(movement);
 
-    p->onGround = false;
-    for (int y = minY; y <= maxY; y++) {
-        for (int x = minX; x <= maxX; x++) {
-            Tile *t = getTile(x, y, map);
+        CALC_BOUNDS;
 
-            if (t != NULL && t->bits.id != 0) {
-                if (p->velY > 0) { /* moving down */
-                    p->y = y * BLOCK_SIZE - p->hb.h - p->hb.y /*- EPSILON*/;
-                    p->grounded = true;
-                    p->hasJumped = false;
-                    p->onGround = true;
-                } else if (p->velY < 0) { /* moving up */
-                    p->y = (y + 1) * BLOCK_SIZE - p->hb.y;
-                    p->onGround = false;
+        p->onGround = false;
+        for (int y = minY; y <= maxY; y++) {
+            for (int x = minX; x <= maxX; x++) {
+                Tile *t = getTile(x, y, map);
+
+                if (t != NULL && t->bits.id != 0) {
+                    if (p->velY > 0) { /* moving down */
+                        i32 newy = y * BLOCK_SIZE - p->hb.h - p->hb.y;
+                        p->pos = posNormalize((Position){.cx = p->pos.cx, .lx = p->pos.lx,
+                                                         .cy = 0.0f, .ly = newy});
+                        p->grounded = true;
+                        p->hasJumped = false;
+                        p->onGround = true;
+                    } else if (p->velY < 0) { /* moving up */
+                        i32 newy = (y + 1) * BLOCK_SIZE - p->hb.y;
+                        p->pos = posNormalize((Position){.cx = p->pos.cx, .lx = p->pos.lx,
+                                                         .cy = 0.0f, .ly = newy});
+                        p->onGround = false;
+                    }
+                    p->velY = 0;
+
+                    int screenX = (x * BLOCK_SIZE) - (int)posGetAbsX(cam->pos) + (HALF_SCREEN_W);
+                    int screenY = (y * BLOCK_SIZE) - (int)posGetAbsY(cam->pos) + (HALF_SCREEN_H);
+                    if (drawDebug)
+                        DrawRectangle(screenX, screenY, BLOCK_SIZE, BLOCK_SIZE, (Color){255, 0, 0, 100});
+                    goto endy;
                 }
-                p->velY = 0;
-
-                int screenX = (x * BLOCK_SIZE) - (int)cam->x + (HALF_SCREEN_W);
-                int screenY = (y * BLOCK_SIZE) - (int)cam->y + (HALF_SCREEN_H);
-                if (drawDebug)
-                    DrawRectangle(screenX, screenY, BLOCK_SIZE, BLOCK_SIZE, (Color){255, 0, 0, 100});
-                goto endy;
             }
         }
     }
-    endy: ;
+    endy:
 
     CALC_BOUNDS;
     return (HitboxBounds){left, right, top, bottom};
@@ -1022,21 +1103,20 @@ void updatePlayer(Player *p, float dt, Camera *cam, ChunkMap *map, PackedTexture
     i32 mx = GetMouseX();
     i32 my = GetMouseY();
 
-    cam->x = p->x + (int)(mx - HALF_SCREEN_W) * 0.5f;
-    cam->y = p->y + (int)(my - HALF_SCREEN_H) * 0.5f;
+    cam->pos = p->pos;
 
-    i32 mouseWorldX = mx + cam->x - (float)HALF_SCREEN_W;
-    i32 mouseWorldY = my + cam->y - (float)HALF_SCREEN_H;
+    i32 mouseWorldX = mx + posGetAbsX(cam->pos) - (float)HALF_SCREEN_W;
+    i32 mouseWorldY = my + posGetAbsY(cam->pos) - (float)HALF_SCREEN_H;
 
     i32 mtx = (i32)floor((float)mouseWorldX / BLOCK_SIZE);
     i32 mty = (i32)floor((float)mouseWorldY / BLOCK_SIZE);
 
-    i32 tileScreenX = (mtx * BLOCK_SIZE) - cam->x + (float)HALF_SCREEN_W;
-    i32 tileScreenY = (mty * BLOCK_SIZE) - cam->y + (float)HALF_SCREEN_H;
+    i32 tileScreenX = (mtx * BLOCK_SIZE) - posGetAbsX(cam->pos) + (float)HALF_SCREEN_W;
+    i32 tileScreenY = (mty * BLOCK_SIZE) - posGetAbsY(cam->pos) + (float)HALF_SCREEN_H;
 
-    if (distance((Point){mtx, mty},
-                 (Point){(int)floor(p->x / BLOCK_SIZE), (int)floor(p->y / BLOCK_SIZE)}) > 20)
+    if (posDist(p->pos, posNormalize((Position){.cx = 0, .cy = 0, .lx = mtx, .ly = mty})) > 20) {
         return;
+    }
 
     Tile *mTile       =   getTile(mtx, mty, map);
     Bg   *mBackground = getBgTile(mtx, mty, map);
@@ -1050,7 +1130,6 @@ void updatePlayer(Player *p, float dt, Camera *cam, ChunkMap *map, PackedTexture
         if (hardness > 0.0f) {
             int ind = (p->focusTime / Blocks[mTile->bits.id].hardness) * breakText.numVariants;
             DrawText(TextFormat("IND: %d", ind),  40, 400, 30, BLACK);
-            printf("index %d\n", ind);
             Texture2D toDraw = breakText.texture[ind];
             DrawTexture(toDraw, tileScreenX, tileScreenY, WHITE);
         }
@@ -1105,11 +1184,9 @@ void updatePlayer(Player *p, float dt, Camera *cam, ChunkMap *map, PackedTexture
 }
 
 void drawPlayer(Player *p, Camera *cam) {
-    int x = (int)(p->x + p->hb.x) - cam->x + (float)HALF_SCREEN_W;
-    int y = (int)(p->y + p->hb.y) - cam->y + (float)HALF_SCREEN_H;
+    Vec2f sub = posDelta(p->pos, cam->pos);
 
-
-    DrawRectangle(x, y, p->hb.w, p->hb.h, BLUE);
+    DrawRectangle(sub.x + (float)HALF_SCREEN_W, sub.y + (float)HALF_SCREEN_H, p->hb.w, p->hb.h, BLUE);
 }
 
 typedef struct Game {
@@ -1175,6 +1252,7 @@ int initGame(Game *game) {
     game->dtMod = 1.0f;
 
     InitWindow(1920, 1080, "random block game idk bro");
+    SetTargetFPS(30);
     SetConfigFlags(FLAG_FULLSCREEN_MODE);
 
     game->breakingTexture.texture     = malloc(sizeof(Texture2D) * BREAKING_ANIM_FRAMECOUNT);
@@ -1183,8 +1261,7 @@ int initGame(Game *game) {
                              game->breakingTexture.texture,
                              BREAKING_ANIM_FRAMECOUNT);
 
-    game->camera.x = 10;
-    game->camera.y = 10;
+    game->camera.pos = makePos(0, 0, 10, 10);
 
     game->chunkMap = calloc(1, sizeof(ChunkMap));
     if (game->chunkMap == NULL) {
@@ -1221,7 +1298,7 @@ int updateGame(Game *game) {
 
     BeginDrawing();
     ClearBackground(SKYBLUE);
-    updateChunks(game->chunkMap, game->camera.x, game->camera.y, 2);
+    updateChunks(game->chunkMap, posGetAbsX(game->camera.pos), posGetAbsY(game->camera.pos), 3);
     updatePlayer(&game->player, dt, &game->camera, game->chunkMap, game->breakingTexture);
     drawPlayer(&game->player, &game->camera);
     DrawFPS(5, 5);
