@@ -48,6 +48,8 @@
 #define PLAYER_HB_OFFSET_X 0
 #define EPSILON 0.001f
 
+#define FLUID_UPDATE_INTERVAL 2.5
+
 #define HALF_SCREEN_W GetScreenWidth() / 2
 #define HALF_SCREEN_H GetScreenHeight() / 2
 
@@ -285,9 +287,20 @@ typedef union Bg {
     u16    data;
 } Bg;
 
+typedef struct FluidBits {
+    u8 type  : 3;
+    u8 level : 5;
+} FluidBits;
+
+typedef union Fluid {
+    FluidBits bits;
+    u8        data;
+} Fluid;
+
 typedef struct Chunk {
-    Tile blocks[CHUNK_SIZE * CHUNK_SIZE];
-    Bg bg[CHUNK_SIZE * CHUNK_SIZE];
+    Tile  blocks[CHUNK_SIZE * CHUNK_SIZE];
+    Bg    bg[CHUNK_SIZE * CHUNK_SIZE];
+    Fluid fluids[CHUNK_SIZE * CHUNK_SIZE];
 } Chunk;
 
 PACK_START typedef struct TableMeta {
@@ -634,6 +647,23 @@ Tile *getTile(i32 x, i32 y, ChunkMap *map) {
     return &pair.chunk->blocks[(localY * 32) + localX];
 }
 
+
+Fluid *getFluid(i32 x, i32 y, ChunkMap *map) {
+    i32 cx = x >> 5;
+    i32 cy = y >> 5;
+
+    i32 localX = x & 31;
+    i32 localY = y & 31;
+
+    ChunkPair pair = touchChunk(map, cx, cy);
+    if (pair.chunk == NULL) {
+        return NULL; /* table full */
+    }
+
+    pair.meta->dirty = true;
+    return &pair.chunk->fluids[(localY * 32) + localX];
+}
+
 Bg *getBgTile(i32 x, i32 y, ChunkMap *map) {
     i32 cx = x >> 5;
     i32 cy = y >> 5;
@@ -771,13 +801,119 @@ void generateChunk(i32 x, i32 y, Chunk *chunk, TableMeta *meta) {
     meta->generated = true;
 }
 
-void updateChunks(ChunkMap *map, i32 x, i32 y, i32 renderDistChunks) {
+void renderChunk(Chunk *chunk, i32 x, i32 y, i32 i, i32 j, ChunkMap *map) {
+    for (int b = 0; b < CHUNK_SIZE * CHUNK_SIZE; b++) {
+        i32 localBlockX = b % CHUNK_SIZE;
+        i32 localBlockY = b / CHUNK_SIZE;
+
+        i32 worldPixelX = (i * CHUNK_SIZE + localBlockX) * BLOCK_SIZE;
+        i32 worldPixelY = (j * CHUNK_SIZE + localBlockY) * BLOCK_SIZE;
+
+        i32 drawX = worldPixelX - x + HALF_SCREEN_W;
+        i32 drawY = worldPixelY - y + HALF_SCREEN_H;
+
+        bool drewFG = false;
+        if (!Blocks[chunk->blocks[b].bits.id].invisible) {
+            u8 index = 0;
+
+            /* calculate bitmasking */
+            i32 worldTileX = i * CHUNK_SIZE + localBlockX;
+            i32 worldTileY = j * CHUNK_SIZE + localBlockY;
+
+            Tile* top = getTileReadOnly(worldTileX, worldTileY - 1, map);
+            if (top != NULL && Blocks[top->bits.id].solid) {
+                index |= 1;
+            }
+
+            Tile* right = getTileReadOnly(worldTileX + 1, worldTileY, map);
+            if (right != NULL && Blocks[right->bits.id].solid) {
+                index |= 2;
+            }
+
+            Tile* bottom = getTileReadOnly(worldTileX, worldTileY + 1, map);
+            if (bottom != NULL && Blocks[bottom->bits.id].solid) {
+                index |= 4;
+            }
+
+            Tile* left = getTileReadOnly(worldTileX - 1, worldTileY, map);
+            if (left != NULL && Blocks[left->bits.id].solid) {
+                index |= 8;
+            }
+
+            Rectangle dest = {.x = (index * 8) % 32,
+                              .y = ((float)(index * 8) / 32) * 8,
+                              .width = 8, .height = 8};
+
+            DrawTexturePro(Blocks[chunk->blocks[b].bits.id].texture,
+                          dest,
+                          (Rectangle){
+                              .x = drawX, .y = drawY,
+                              .width = BLOCK_SIZE, .height = BLOCK_SIZE
+                          },
+                          (Vector2)  {.x = 0, .y = 0},
+                          0.0f,
+                          (Color){255, 255, 255, 255}
+            );
+            drewFG = true;
+        }
+
+        if (!drewFG) {
+            switch (chunk->bg[b].bits.id) {
+            case 1: ;
+                DrawRectangle(drawX, drawY,
+                              BLOCK_SIZE, BLOCK_SIZE,
+                              (Color) {.r = 150 * 0.5, .g = 75 * 0.5, .b = 0 * 0.5, .a = 255});
+                break;
+
+            case 2:
+                DrawRectangle(drawX, drawY,
+                              BLOCK_SIZE, BLOCK_SIZE,
+                              (Color) {.r = 124 * 0.5, .g = 189 * 0.5, .b = 107 * 0.5, .a = 255});
+                break;
+
+            case 3:
+                DrawRectangle(drawX, drawY,
+                              BLOCK_SIZE, BLOCK_SIZE,
+                              (Color) {.r = 149 * 0.5, .g = 150 * 0.5, .b = 149 * 0.5, .a = 255});
+                break;
+            }
+        }
+
+        if (chunk->fluids[b].bits.level > 0) {
+            i32 height = chunk->fluids[b].bits.level;
+            DrawRectangle(drawX, drawY + BLOCK_SIZE - height, BLOCK_SIZE, height, (Color){87, 227, 237, 127});
+        }
+}
+    }
+
+void simulateFluids(Chunk *chunk, i32 i, i32 j, ChunkMap *map) {
+    i32 wx, wy;
+    for (i32 d = CHUNK_SIZE * CHUNK_SIZE - 1; d >= 0; d--) {
+        wx = i * CHUNK_SIZE + (d % CHUNK_SIZE);
+        wy = j * CHUNK_SIZE + (d / CHUNK_SIZE);
+
+        Fluid *down = getFluid(wx, wy + 1, map);
+        u8 locLevel = chunk->fluids[d].bits.level;
+
+        if (locLevel > 0) {
+            if (down->bits.level < 16 && !Blocks[getTile(wx, wy + 1, map)->bits.id].solid) {
+                u8 toPut  = 16 - down->bits.level;
+                u8 canPut = MIN(toPut, locLevel);
+                down->bits.level += canPut;
+                chunk->fluids[d].bits.level -= canPut;
+            }
+        }
+    }
+}
+
+void updateChunks(ChunkMap *map, i32 x, i32 y, i32 renderDistChunks, float *fluidUpdate) {
     collectGarbage(map, x, y, renderDistChunks);
 
     int chunkPixelSize = CHUNK_SIZE * BLOCK_SIZE;
     int centerChunkX = (x < 0) ? (x - chunkPixelSize + 1) / chunkPixelSize : x / chunkPixelSize;
     int centerChunkY = (y < 0) ? (y - chunkPixelSize + 1) / chunkPixelSize : y / chunkPixelSize;
 
+    bool zeroFC = false;
     for (int i = centerChunkX - renderDistChunks; i < centerChunkX + renderDistChunks; i++) {
         for (int j = centerChunkY - renderDistChunks; j < centerChunkY + renderDistChunks; j++) {
             Chunk *chunk = getChunkMut(map, i, j);
@@ -794,84 +930,11 @@ void updateChunks(ChunkMap *map, i32 x, i32 y, i32 renderDistChunks) {
                 continue; 
             }
 
-            for (int b = 0; b < CHUNK_SIZE * CHUNK_SIZE; b++) {
-                i32 localBlockX = b % CHUNK_SIZE;
-                i32 localBlockY = b / CHUNK_SIZE;
-
-                i32 worldPixelX = (i * CHUNK_SIZE + localBlockX) * BLOCK_SIZE;
-                i32 worldPixelY = (j * CHUNK_SIZE + localBlockY) * BLOCK_SIZE;
-
-                i32 drawX = worldPixelX - x + HALF_SCREEN_W;
-                i32 drawY = worldPixelY - y + HALF_SCREEN_H;
-
-                bool drewFG = false;
-                if (!Blocks[chunk->blocks[b].bits.id].invisible) {
-                    u8 index = 0;
-
-                    /* calculate bitmasking */
-                    i32 worldTileX = i * CHUNK_SIZE + localBlockX;
-                    i32 worldTileY = j * CHUNK_SIZE + localBlockY;
-
-                    Tile* top = getTileReadOnly(worldTileX, worldTileY - 1, map);
-                    if (top != NULL && Blocks[top->bits.id].solid) {
-                        index |= 1;
-                    }
-
-                    Tile* right = getTileReadOnly(worldTileX + 1, worldTileY, map);
-                    if (right != NULL && Blocks[right->bits.id].solid) {
-                        index |= 2;
-                    }
-
-                    Tile* bottom = getTileReadOnly(worldTileX, worldTileY + 1, map);
-                    if (bottom != NULL && Blocks[bottom->bits.id].solid) {
-                        index |= 4;
-                    }
-
-                    Tile* left = getTileReadOnly(worldTileX - 1, worldTileY, map);
-                    if (left != NULL && Blocks[left->bits.id].solid) {
-                        index |= 8;
-                    }
-
-                    Rectangle dest = {.x = (index * 8) % 32,
-                                      .y = ((float)(index * 8) / 32) * 8,
-                                      .width = 8, .height = 8};
-
-                    DrawTexturePro(Blocks[chunk->blocks[b].bits.id].texture,
-                                  dest,
-                                  (Rectangle){
-                                      .x = drawX, .y = drawY,
-                                      .width = BLOCK_SIZE, .height = BLOCK_SIZE
-                                  },
-                                  (Vector2)  {.x = 0, .y = 0},
-                                  0.0f,
-                                  (Color){255, 255, 255, 255}
-                    );
-                    drewFG = true;
-                }
-
-                if (!drewFG) {
-                    switch (chunk->bg[b].bits.id) {
-                    case 1: ;
-                        DrawRectangle(drawX, drawY,
-                                      BLOCK_SIZE, BLOCK_SIZE,
-                                      (Color) {.r = 150 * 0.5, .g = 75 * 0.5, .b = 0 * 0.5, .a = 255});
-                        break;
-
-                    case 2:
-                        DrawRectangle(drawX, drawY,
-                                      BLOCK_SIZE, BLOCK_SIZE,
-                                      (Color) {.r = 124 * 0.5, .g = 189 * 0.5, .b = 107 * 0.5, .a = 255});
-                        break;
-
-                    case 3:
-                        DrawRectangle(drawX, drawY,
-                                      BLOCK_SIZE, BLOCK_SIZE,
-                                      (Color) {.r = 149 * 0.5, .g = 150 * 0.5, .b = 149 * 0.5, .a = 255});
-                        break;
-                    }
-                }
+            if (*fluidUpdate > (float)FLUID_UPDATE_INTERVAL) {
+                simulateFluids(chunk, i, j, map);
+                zeroFC = true;
             }
-
+            renderChunk(chunk, x, y, i, j, map);
             /* debug overlay */
             if (IsKeyDown(KEY_GRAVE)) {
                 i32 worldX = (i * CHUNK_SIZE * BLOCK_SIZE);
@@ -883,6 +946,10 @@ void updateChunks(ChunkMap *map, i32 x, i32 y, i32 renderDistChunks) {
                               (Color){.r = 255, .g = 0, .b = 0, .a = 255});
             }
         }
+    }
+
+    if (zeroFC) {
+        *fluidUpdate = true;
     }
 }
 
@@ -1119,8 +1186,9 @@ void updatePlayer(Player *p, float dt, Camera *cam, ChunkMap *map, PackedTexture
         return;
     }
 
-    Tile *mTile       =   getTile(mtx, mty, map);
-    Bg   *mBackground = getBgTile(mtx, mty, map);
+    Tile  *mTile       =   getTile(mtx, mty, map);
+    Fluid *mFluid      =   getFluid(mtx, mty, map);
+    Bg    *mBackground =   getBgTile(mtx, mty, map);
 
     // DrawRectangle(tileScreenX, tileScreenY, BLOCK_SIZE, BLOCK_SIZE,
     //               (Color){11, 11, 11, 255 * p->focusTime / Blocks[mTile->bits.id].hardness});
@@ -1156,7 +1224,8 @@ void updatePlayer(Player *p, float dt, Camera *cam, ChunkMap *map, PackedTexture
                                        pBounds.top < tBottom && pBounds.bottom > tTop);
             if (!playerOverlapsTile) {
                 if (mBackground->bits.id != 0) {
-                    mTile->bits.id = 1;
+                    // mTile->bits.id = 1;
+                    mFluid->bits.level = 8;
                 } else {
                     Tile *leftTile  = getTile(mtx - 1, mty, map);
                     Tile *rightTile = getTile(mtx + 1, mty, map);
@@ -1193,9 +1262,10 @@ void drawPlayer(Player *p, Camera *cam) {
 typedef struct Game {
     Camera camera;
     ChunkMap *chunkMap;
+    PackedTexture breakingTexture;
     Player player;
     float dtMod;
-    PackedTexture breakingTexture;
+    float fluidUpdateCounter;
     int (*init)(struct Game *game);
     int (*update)(struct Game *game);
     int (*end)(struct Game *game);
@@ -1296,9 +1366,11 @@ int updateGame(Game *game) {
 
     dt *= game->dtMod;
 
+    game->fluidUpdateCounter += dt;
+
     BeginDrawing();
     ClearBackground(SKYBLUE);
-    updateChunks(game->chunkMap, posGetAbsX(game->camera.pos), posGetAbsY(game->camera.pos), 3);
+    updateChunks(game->chunkMap, posGetAbsX(game->camera.pos), posGetAbsY(game->camera.pos), 3, &game->fluidUpdateCounter);
     updatePlayer(&game->player, dt, &game->camera, game->chunkMap, game->breakingTexture);
     drawPlayer(&game->player, &game->camera);
     DrawFPS(5, 5);
