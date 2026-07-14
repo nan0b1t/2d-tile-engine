@@ -1114,7 +1114,8 @@ void updatePlayer(Player *p, float dt, Camera *cam, ChunkMap *map, PackedTexture
     i32 tileScreenX = (mtx * BLOCK_SIZE) - posGetAbsX(cam->pos) + (float)HALF_SCREEN_W;
     i32 tileScreenY = (mty * BLOCK_SIZE) - posGetAbsY(cam->pos) + (float)HALF_SCREEN_H;
 
-    if (posDist(p->pos, posNormalize((Position){.cx = 0, .cy = 0, .lx = mtx, .ly = mty})) > 20) {
+    float dist = posDist(p->pos, posNormalize((Position){.cx = 0, .cy = 0, .lx = mtx * BLOCK_SIZE, .ly = mty * BLOCK_SIZE}));
+    if (dist > 400) {
         return;
     }
 
@@ -1252,7 +1253,6 @@ int initGame(Game *game) {
     game->dtMod = 1.0f;
 
     InitWindow(1920, 1080, "random block game idk bro");
-    SetTargetFPS(30);
     SetConfigFlags(FLAG_FULLSCREEN_MODE);
 
     game->breakingTexture.texture     = malloc(sizeof(Texture2D) * BREAKING_ANIM_FRAMECOUNT);
