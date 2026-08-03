@@ -975,7 +975,7 @@ void renderChunk(Chunk *chunk, i32 x, i32 y, i32 i, i32 j, ChunkMap *map) {
 }
     }
 
-void simulateFluids(Chunk *chunk, i32 i, i32 j, ChunkMap *map) {
+void simulateFluids(Chunk *chunk, i32 i, i32 j, ChunkMap *map, u32 tickCount) {
     i32 wx, wy;
     for (i32 d = CHUNK_SIZE * CHUNK_SIZE - 1; d >= 0; d--) {
         if (getFluidBit(d, chunk))
@@ -1008,28 +1008,51 @@ void simulateFluids(Chunk *chunk, i32 i, i32 j, ChunkMap *map) {
             }
 
             bool flowleft = false, flowright = false;
-            u8 leftFlow, rightFlow;
 
             Tile *t = getTile(wx - 1, wy, map);
             if (t && leftWrite->bits.level < locWrite->bits.level && !Blocks[t->bits.id].solid) {
                 flowleft = true;
-                leftFlow = MIN(locWrite->bits.level - leftWrite->bits.level, 16 - leftWrite->bits.level);
             }
 
             t = getTile(wx + 1, wy, map);
             if (t && rightWrite->bits.level < locWrite->bits.level && !Blocks[t->bits.id].solid) {
                 flowright = true;
-                rightFlow = MIN(locWrite->bits.level - rightWrite->bits.level, 16 - rightWrite->bits.level);
             }
 
             if (!flowright && flowleft) {
-                leftWrite->bits.level += leftFlow; 
-                locWrite->bits.level  -= leftFlow;
+                u8 total = 0;
+                total += chunk->fluids[d].bits.level;
+                total += leftWrite->bits.level;
+
+                u8 div       = total / 2;
+                u8 remainder = total % 2;
+
+                chunk->fluids[d].bits.level = div;
+                leftWrite->bits.level       = div;
+
+                if (tickCount % 2) {
+                    chunk->fluids[d].bits.level += remainder;
+                } else {
+                    leftWrite->bits.level += remainder;
+                }
             }
 
             if (!flowleft && flowright) {
-                rightWrite->bits.level += rightFlow; 
-                locWrite->bits.level   -= rightFlow;
+                u8 total = 0;
+                total += chunk->fluids[d].bits.level;
+                total += rightWrite->bits.level;
+
+                u8 div       = total / 2;
+                u8 remainder = total % 2;
+
+                chunk->fluids[d].bits.level = div;
+                rightWrite->bits.level      = div;
+
+                if (tickCount % 2) {
+                    chunk->fluids[d].bits.level += remainder;
+                } else {
+                    rightWrite->bits.level += remainder;
+                }
             }
 
             if (flowleft && flowright) {
@@ -1041,15 +1064,26 @@ void simulateFluids(Chunk *chunk, i32 i, i32 j, ChunkMap *map) {
                 u8 divided = total / 3;
                 u8 remainder = total % 3;
 
-                chunk->fluids[d].bits.level = divided + remainder;
+                chunk->fluids[d].bits.level = divided;
                 rightWrite->bits.level      = divided;
                 leftWrite->bits.level       = divided;
+
+                switch (tickCount % 3) {
+                case 0:
+                    chunk->fluids[d].bits.level += remainder;
+                    break;
+                case 1:
+                    leftWrite->bits.level       += remainder;
+                    break;
+                case 2:
+                    rightWrite->bits.level      += remainder;
+                }
             }
         }
     }
 }
 
-void updateChunks(ChunkMap *map, i32 x, i32 y, i32 renderDistChunks, float *fluidUpdate) {
+void updateChunks(ChunkMap *map, i32 x, i32 y, i32 renderDistChunks, float *fluidUpdate, u32 *tc) {
     collectGarbage(map, x, y, renderDistChunks);
 
     i32 chunkPixelSize = CHUNK_SIZE * BLOCK_SIZE;
@@ -1075,9 +1109,11 @@ void updateChunks(ChunkMap *map, i32 x, i32 y, i32 renderDistChunks, float *flui
             }
 
             if (*fluidUpdate > (float)FLUID_UPDATE_INTERVAL) {
-                simulateFluids(chunk, i, j, map);
+                (*tc)++;
+                simulateFluids(chunk, i, j, map, *tc);
                 zeroFC = true;
             }
+
             renderChunk(chunk, x, y, i, j, map);
             /* debug overlay */
             if (IsKeyDown(KEY_GRAVE)) {
@@ -1423,6 +1459,7 @@ typedef struct Game {
     Player player;
     float dtMod;
     float fluidUpdateCounter;
+    u32 tickCount;
     i32 (*init)(struct Game *game);
     i32 (*update)(struct Game *game);
     i32 (*end)(struct Game *game);
@@ -1527,7 +1564,14 @@ i32 updateGame(Game *game) {
 
     BeginDrawing();
     ClearBackground(SKYBLUE);
-    updateChunks(game->chunkMap, posGetAbsX(game->camera.pos), posGetAbsY(game->camera.pos), 3, &game->fluidUpdateCounter);
+    updateChunks(game->chunkMap,
+                 posGetAbsX(game->camera.pos),
+                 posGetAbsY(game->camera.pos),
+                 3,
+                 &game->fluidUpdateCounter,
+                 &game->tickCount
+    );
+
     updatePlayer(&game->player, dt, &game->camera, game->chunkMap, game->breakingTexture);
     drawPlayer(&game->player, &game->camera);
     DrawFPS(5, 5);
