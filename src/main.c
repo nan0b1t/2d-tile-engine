@@ -1,3 +1,4 @@
+#include <stdatomic.h>
 #define Camera stupid_garbage_lol
 #include "raylib.h"
 #undef Camera
@@ -48,6 +49,8 @@
 #define PLAYER_HB_OFFSET_X 0
 #define EPSILON 0.001f
 
+#define FLUID_UPDATE_INTERVAL 0.75
+
 #define HALF_SCREEN_W GetScreenWidth() / 2
 #define HALF_SCREEN_H GetScreenHeight() / 2
 
@@ -67,7 +70,7 @@
     #define PACK_ATTR __attribute__((packed))
 #endif
 
-int frame = 0;
+i32 frame = 0;
 
 typedef struct Position {
     i32 cx, cy;
@@ -135,12 +138,12 @@ static inline float posGetAbsX(Position p) {
 
 typedef struct PackedTexture {
     Texture2D *texture;
-    int numVariants;
+    i32 numVariants;
 } PackedTexture;
 
 typedef struct BlockTextureSlice {
-    int x, y;
-    int width, height;
+    i32 x, y;
+    i32 width, height;
 } BlockTextureSlice;
 
 typedef struct BlockDef {
@@ -205,8 +208,8 @@ BlockDef Blocks[] = {
 /* ==============================================================================================*/
 /* MATH                                                                                          */
 /* ==============================================================================================*/
-int getTileCoord(float coord, float blockSize) {
-    int val = (int)(coord / blockSize);
+i32 getTileCoord(float coord, float blockSize) {
+    i32 val = (i32)(coord / blockSize);
     float remainder = coord - (val * blockSize);
 
     if (remainder < 0) {
@@ -285,10 +288,42 @@ typedef union Bg {
     u16    data;
 } Bg;
 
+typedef struct FluidBits {
+    u8 type  : 3;
+    u8 level : 5;
+} FluidBits;
+
+typedef union Fluid {
+    FluidBits bits;
+    u8        data;
+} Fluid;
+
+#define WORD_BITS 64
+#define NUM_WORDS (((CHUNK_SIZE * CHUNK_SIZE) + WORD_BITS - 1) / WORD_BITS)
+
 typedef struct Chunk {
-    Tile blocks[CHUNK_SIZE * CHUNK_SIZE];
-    Bg bg[CHUNK_SIZE * CHUNK_SIZE];
+    Tile  blocks[CHUNK_SIZE * CHUNK_SIZE];
+    Bg    bg[CHUNK_SIZE * CHUNK_SIZE];
+    Fluid fluids[CHUNK_SIZE * CHUNK_SIZE];
+    u64   fluidMarkers[NUM_WORDS]; /* used for marking if fluid has been simulated already */
 } Chunk;
+
+void setFluidBit(size_t index, Chunk *c) {
+    c->fluidMarkers[index / WORD_BITS] |= (1ULL << (index % WORD_BITS));
+}
+
+void clearFluidBit(size_t index, Chunk *c) {
+    c->fluidMarkers[index / WORD_BITS] &= ~(1ULL << (index % WORD_BITS));
+}
+
+i32 getFluidBit(size_t index, Chunk *c) {
+    return (c->fluidMarkers[index / WORD_BITS] >> (index % WORD_BITS)) & 1;
+}
+
+void clearAllBits(Chunk *c) {
+    for (i32 i = 0; i < NUM_WORDS; i++)
+        c->fluidMarkers[i] = 0ULL;
+}
 
 PACK_START typedef struct TableMeta {
     i32 x, y;
@@ -299,7 +334,7 @@ PACK_START typedef struct TableMeta {
 
 PACK_END typedef struct ChunkMap {
     TableMeta meta[TABLE_SIZE];
-    Chunk chunks[TABLE_SIZE];
+    Chunk   chunks[TABLE_SIZE];
 } ChunkMap;
 
 u32 getTableIndex(i32 x, i32 y) {
@@ -352,6 +387,59 @@ Chunk *getChunkMut(ChunkMap *chunkMap, i32 x, i32 y) {
         }
     }
     return NULL;
+}
+
+typedef struct PackedTileMut { /* used for gameplay code, not high performance loops */
+    Chunk *chunk;
+    i32    index;
+    Tile  *tile;
+    Bg    *bg;
+    Fluid *fluid;
+} PackedTileMut;
+
+typedef struct PackedTile { /* used for gameplay code, not high performance loops */
+    const Chunk *chunk;
+    const i32    index;
+    const Tile  *tile;
+    const Bg    *bg;
+    const Fluid *fluid;
+} PackedTile;
+
+PackedTile getPackedTile(i32 x, i32 y, ChunkMap *map) {
+    i32 cx = x >> 5;
+    i32 cy = y >> 5;
+
+    Chunk *c = getChunkMut(map, cx, cy);
+
+    i32 index = y * CHUNK_SIZE + x;
+
+    return (PackedTile) {
+        .index = index,
+        .chunk = c,
+        .tile  = &c->blocks[index],
+        .bg    = &c->bg[index],
+        .fluid = &c->fluids[index]
+    };
+}
+
+PackedTileMut getPackedTileMut(i32 x, i32 y, ChunkMap *map) {
+    i32 cx = x >> 5;
+    i32 cy = y >> 5;
+
+    i32 lx = x>> 5;
+    i32 ly = y >> 5;
+
+    Chunk *c = getChunkMut(map, cx, cy);
+
+    i32 index = ly * CHUNK_SIZE + lx;
+
+    return (PackedTileMut) {
+        .index = index,
+        .chunk = c,
+        .tile  = &c->blocks[index],
+        .bg    = &c->bg[index],
+        .fluid = &c->fluids[index]
+    };
 }
 
 void setChunk(ChunkMap *chunkMap, i32 x, i32 y, Chunk *chunk) {
@@ -454,7 +542,7 @@ void removeChunk(ChunkMap *chunkMap, i32 x, i32 y) {
 
 void collectGarbage(ChunkMap *chunkMap, i32 playerX, i32 playerY, i32 renderDistChunks) {
     Point playerChunk;
-    int chunkPixelSize = CHUNK_SIZE * BLOCK_SIZE;
+    i32 chunkPixelSize = CHUNK_SIZE * BLOCK_SIZE;
 
     playerChunk.x = (playerX < 0) ? (playerX - chunkPixelSize + 1) / chunkPixelSize : playerX / chunkPixelSize;
     playerChunk.y = (playerY < 0) ? (playerY - chunkPixelSize + 1) / chunkPixelSize : playerY / chunkPixelSize;
@@ -492,10 +580,10 @@ Point localToWorld(i32 x, i32 y, Camera camera) {
 }
 
 Point localToBlock(i32 x, i32 y, Camera camera) {
-    x = x + (int)posGetAbsX(camera.pos) % BLOCK_SIZE;
+    x = x + (i32)posGetAbsX(camera.pos) % BLOCK_SIZE;
     if (x < 0) x += BLOCK_SIZE;
 
-    y = y + (int)posGetAbsY(camera.pos) % BLOCK_SIZE;
+    y = y + (i32)posGetAbsY(camera.pos) % BLOCK_SIZE;
     if (y < 0) y += BLOCK_SIZE;
 
     return (Point) {
@@ -509,7 +597,7 @@ Point localToBlock(i32 x, i32 y, Camera camera) {
 /* ==============================================================================================*/
 
 double magicHash(i32 x, i32 seed) {
-    uint32_t state = (i32)x + ((i32)seed * 0x9E3779B9U);
+    u32 state = (i32)x + ((i32)seed * 0x9E3779B9U);
 
     state ^= state >> 16;
     state *= 0x7FEB352DU;
@@ -540,8 +628,8 @@ double noise(double i, i32 seed) {
     return lowerPull + magicFade(lowerDist) * (higherPull - lowerPull);
 }
 
-void hash_2d(int32_t x, int32_t y, int32_t seed, double* out_gx, double* out_gy) {
-    uint32_t state = (uint32_t)x * 0x1F1C1F1CU + (uint32_t)y * 0x3A3A3A3AU + ((uint32_t)seed * 0x9E3779B9U);
+void hash_2d(i32 x, i32 y, i32 seed, double* out_gx, double* out_gy) {
+    u32 state = (u32)x * 0x1F1C1F1CU + (u32)y * 0x3A3A3A3AU + ((u32)seed * 0x9E3779B9U);
 
     state ^= state >> 16;
     state *= 0x7FEB352DU;
@@ -558,11 +646,11 @@ void hash_2d(int32_t x, int32_t y, int32_t seed, double* out_gx, double* out_gy)
 }
 
 
-double noise_2d(double x, double y, int32_t seed) {
-    int32_t x0 = (int32_t)floor(x);
-    int32_t x1 = x0 + 1;
-    int32_t y0 = (int32_t)floor(y);
-    int32_t y1 = y0 + 1;
+double noise_2d(double x, double y, i32 seed) {
+    i32 x0 = (i32)floor(x);
+    i32 x1 = x0 + 1;
+    i32 y0 = (i32)floor(y);
+    i32 y1 = y0 + 1;
 
     double xf0 = x - (double)x0; double yf0 = y - (double)y0;
     double xf1 = x - (double)x1; double yf1 = y - (double)y0;
@@ -634,6 +722,37 @@ Tile *getTile(i32 x, i32 y, ChunkMap *map) {
     return &pair.chunk->blocks[(localY * 32) + localX];
 }
 
+
+const Fluid *getFluid(i32 x, i32 y, ChunkMap *map) {
+    i32 cx = x >> 5;
+    i32 cy = y >> 5;
+
+    i32 localX = x & 31;
+    i32 localY = y & 31;
+
+    Chunk *chunk = getChunkMut(map, cx, cy);
+    if (chunk == NULL) {
+        return NULL; /* table full */
+    }
+
+    return &chunk->fluids[(localY * 32) + localX];
+}
+
+Fluid *writeFluid(i32 x, i32 y, ChunkMap *map) {
+    i32 cx = x >> 5;
+    i32 cy = y >> 5;
+
+    i32 localX = x & 31;
+    i32 localY = y & 31;
+
+    Chunk *chunk = getChunkMut(map, cx, cy);
+    if (chunk == NULL) {
+        return NULL;
+    }
+
+    return &chunk->fluids[(localY * 32) + localX];
+}
+
 Bg *getBgTile(i32 x, i32 y, ChunkMap *map) {
     i32 cx = x >> 5;
     i32 cy = y >> 5;
@@ -687,7 +806,7 @@ void generateChunk(i32 x, i32 y, Chunk *chunk, TableMeta *meta) {
     i32 worldX = x * CHUNK_SIZE;
     i32 worldY = y * CHUNK_SIZE;
 
-    for (int i = 0; i < CHUNK_SIZE; i++) {
+    for (i32 i = 0; i < CHUNK_SIZE; i++) {
         i32 localCol = i;
         i32 globalCol = worldX + localCol;
 
@@ -735,7 +854,7 @@ void generateChunk(i32 x, i32 y, Chunk *chunk, TableMeta *meta) {
         i32 dirtStart  = grassStart + 2;
         i32 stoneStart = dirtStart + 10;
 
-        for (int j = 0; j < CHUNK_SIZE; j++) {
+        for (i32 j = 0; j < CHUNK_SIZE; j++) {
             i32 projX = globalCol;
             i32 projY = worldY + j;
 
@@ -771,19 +890,214 @@ void generateChunk(i32 x, i32 y, Chunk *chunk, TableMeta *meta) {
     meta->generated = true;
 }
 
-void updateChunks(ChunkMap *map, i32 x, i32 y, i32 renderDistChunks) {
+void renderChunk(Chunk *chunk, i32 x, i32 y, i32 i, i32 j, ChunkMap *map) {
+    for (i32 b = 0; b < CHUNK_SIZE * CHUNK_SIZE; b++) {
+        i32 localBlockX = b % CHUNK_SIZE;
+        i32 localBlockY = b / CHUNK_SIZE;
+
+        i32 worldPixelX = (i * CHUNK_SIZE + localBlockX) * BLOCK_SIZE;
+        i32 worldPixelY = (j * CHUNK_SIZE + localBlockY) * BLOCK_SIZE;
+
+        i32 drawX = worldPixelX - x + HALF_SCREEN_W;
+        i32 drawY = worldPixelY - y + HALF_SCREEN_H;
+
+        bool drewFG = false;
+        if (!Blocks[chunk->blocks[b].bits.id].invisible) {
+            u8 index = 0;
+
+            /* calculate bitmasking */
+            i32 worldTileX = i * CHUNK_SIZE + localBlockX;
+            i32 worldTileY = j * CHUNK_SIZE + localBlockY;
+
+            Tile* top = getTileReadOnly(worldTileX, worldTileY - 1, map);
+            if (top != NULL && Blocks[top->bits.id].solid) {
+                index |= 1;
+            }
+
+            Tile* right = getTileReadOnly(worldTileX + 1, worldTileY, map);
+            if (right != NULL && Blocks[right->bits.id].solid) {
+                index |= 2;
+            }
+
+            Tile* bottom = getTileReadOnly(worldTileX, worldTileY + 1, map);
+            if (bottom != NULL && Blocks[bottom->bits.id].solid) {
+                index |= 4;
+            }
+
+            Tile* left = getTileReadOnly(worldTileX - 1, worldTileY, map);
+            if (left != NULL && Blocks[left->bits.id].solid) {
+                index |= 8;
+            }
+
+            Rectangle dest = {.x = (index * 8) % 32,
+                              .y = ((float)(index * 8) / 32) * 8,
+                              .width = 8, .height = 8};
+
+            DrawTexturePro(Blocks[chunk->blocks[b].bits.id].texture,
+                          dest,
+                          (Rectangle){
+                              .x = drawX, .y = drawY,
+                              .width = BLOCK_SIZE, .height = BLOCK_SIZE
+                          },
+                          (Vector2)  {.x = 0, .y = 0},
+                          0.0f,
+                          (Color){255, 255, 255, 255}
+            );
+            drewFG = true;
+        }
+
+        if (!drewFG) {
+            switch (chunk->bg[b].bits.id) {
+            case 1: ;
+                DrawRectangle(drawX, drawY,
+                              BLOCK_SIZE, BLOCK_SIZE,
+                              (Color) {.r = 150 * 0.5, .g = 75 * 0.5, .b = 0 * 0.5, .a = 255});
+                break;
+
+            case 2:
+                DrawRectangle(drawX, drawY,
+                              BLOCK_SIZE, BLOCK_SIZE,
+                              (Color) {.r = 124 * 0.5, .g = 189 * 0.5, .b = 107 * 0.5, .a = 255});
+                break;
+
+            case 3:
+                DrawRectangle(drawX, drawY,
+                              BLOCK_SIZE, BLOCK_SIZE,
+                              (Color) {.r = 149 * 0.5, .g = 150 * 0.5, .b = 149 * 0.5, .a = 255});
+                break;
+            }
+        }
+
+        if (chunk->fluids[b].bits.level > 0) {
+            i32 height = chunk->fluids[b].bits.level;
+            DrawRectangle(drawX, drawY + BLOCK_SIZE - height, BLOCK_SIZE, height, (Color){87, 227, 237, 127});
+        }
+}
+    }
+
+void simulateFluids(Chunk *chunk, i32 i, i32 j, ChunkMap *map, u32 tickCount) {
+    i32 wx, wy;
+    for (i32 d = CHUNK_SIZE * CHUNK_SIZE - 1; d >= 0; d--) {
+        if (getFluidBit(d, chunk))
+            continue;
+
+        setFluidBit(d, chunk);
+
+        wx = i * CHUNK_SIZE + (d % CHUNK_SIZE);
+        wy = j * CHUNK_SIZE + (d / CHUNK_SIZE);
+
+        Fluid *locWrite   = &chunk->fluids[d];
+        Fluid *downWrite  = writeFluid(wx, wy + 1, map);
+        Fluid *leftWrite  = writeFluid(wx - 1, wy, map);
+        Fluid *rightWrite = writeFluid(wx + 1, wy, map);
+        if (!locWrite || !downWrite || !leftWrite || !rightWrite)
+            continue;
+
+        if (locWrite->bits.level > 0) {
+            if (downWrite->bits.level < 16 && !Blocks[getTile(wx, wy + 1, map)->bits.id].solid) {
+                u8 toPut  = 16 - downWrite->bits.level;
+                u8 canPut = MIN(toPut, locWrite->bits.level);
+                downWrite->bits.level += canPut;
+                locWrite->bits.level -= canPut;
+                PackedTileMut pt = getPackedTileMut(wx, wy + 1, map);
+                setFluidBit(pt.index, pt.chunk);
+            }
+
+            if (locWrite->bits.level == 0) {
+                continue;
+            }
+
+            bool flowleft = false, flowright = false;
+
+            Tile *t = getTile(wx - 1, wy, map);
+            if (t && leftWrite->bits.level < locWrite->bits.level && !Blocks[t->bits.id].solid) {
+                flowleft = true;
+            }
+
+            t = getTile(wx + 1, wy, map);
+            if (t && rightWrite->bits.level < locWrite->bits.level && !Blocks[t->bits.id].solid) {
+                flowright = true;
+            }
+
+            if (!flowright && flowleft) {
+                u8 total = 0;
+                total += chunk->fluids[d].bits.level;
+                total += leftWrite->bits.level;
+
+                u8 div       = total / 2;
+                u8 remainder = total % 2;
+
+                chunk->fluids[d].bits.level = div;
+                leftWrite->bits.level       = div;
+
+                if (tickCount % 2) {
+                    chunk->fluids[d].bits.level += remainder;
+                } else {
+                    leftWrite->bits.level += remainder;
+                }
+            }
+
+            if (!flowleft && flowright) {
+                u8 total = 0;
+                total += chunk->fluids[d].bits.level;
+                total += rightWrite->bits.level;
+
+                u8 div       = total / 2;
+                u8 remainder = total % 2;
+
+                chunk->fluids[d].bits.level = div;
+                rightWrite->bits.level      = div;
+
+                if (tickCount % 2) {
+                    chunk->fluids[d].bits.level += remainder;
+                } else {
+                    rightWrite->bits.level += remainder;
+                }
+            }
+
+            if (flowleft && flowright) {
+                u8 total = 0;
+                total += rightWrite->bits.level;
+                total += leftWrite->bits.level;
+                total += chunk->fluids[d].bits.level;
+
+                u8 divided = total / 3;
+                u8 remainder = total % 3;
+
+                chunk->fluids[d].bits.level = divided;
+                rightWrite->bits.level      = divided;
+                leftWrite->bits.level       = divided;
+
+                switch (tickCount % 3) {
+                case 0:
+                    chunk->fluids[d].bits.level += remainder;
+                    break;
+                case 1:
+                    leftWrite->bits.level       += remainder;
+                    break;
+                case 2:
+                    rightWrite->bits.level      += remainder;
+                }
+            }
+        }
+    }
+}
+
+void updateChunks(ChunkMap *map, i32 x, i32 y, i32 renderDistChunks, float *fluidUpdate, u32 *tc) {
     collectGarbage(map, x, y, renderDistChunks);
 
-    int chunkPixelSize = CHUNK_SIZE * BLOCK_SIZE;
-    int centerChunkX = (x < 0) ? (x - chunkPixelSize + 1) / chunkPixelSize : x / chunkPixelSize;
-    int centerChunkY = (y < 0) ? (y - chunkPixelSize + 1) / chunkPixelSize : y / chunkPixelSize;
+    i32 chunkPixelSize = CHUNK_SIZE * BLOCK_SIZE;
+    i32 centerChunkX = (x < 0) ? (x - chunkPixelSize + 1) / chunkPixelSize : x / chunkPixelSize;
+    i32 centerChunkY = (y < 0) ? (y - chunkPixelSize + 1) / chunkPixelSize : y / chunkPixelSize;
 
-    for (int i = centerChunkX - renderDistChunks; i < centerChunkX + renderDistChunks; i++) {
-        for (int j = centerChunkY - renderDistChunks; j < centerChunkY + renderDistChunks; j++) {
+    bool zeroFC = false;
+    for (i32 i = centerChunkX - renderDistChunks; i < centerChunkX + renderDistChunks; i++) {
+        for (i32 j = centerChunkY - renderDistChunks; j < centerChunkY + renderDistChunks; j++) {
             Chunk *chunk = getChunkMut(map, i, j);
             TableMeta *meta;
-            if (chunk == NULL) {
-                ChunkPair pair = touchChunk(map, i, j);
+            ChunkPair pair = touchChunk(map, i, j);
+
+            if (!pair.meta->generated) {
                 chunk = pair.chunk;
                 meta = pair.meta;
 
@@ -794,84 +1108,13 @@ void updateChunks(ChunkMap *map, i32 x, i32 y, i32 renderDistChunks) {
                 continue; 
             }
 
-            for (int b = 0; b < CHUNK_SIZE * CHUNK_SIZE; b++) {
-                i32 localBlockX = b % CHUNK_SIZE;
-                i32 localBlockY = b / CHUNK_SIZE;
-
-                i32 worldPixelX = (i * CHUNK_SIZE + localBlockX) * BLOCK_SIZE;
-                i32 worldPixelY = (j * CHUNK_SIZE + localBlockY) * BLOCK_SIZE;
-
-                i32 drawX = worldPixelX - x + HALF_SCREEN_W;
-                i32 drawY = worldPixelY - y + HALF_SCREEN_H;
-
-                bool drewFG = false;
-                if (!Blocks[chunk->blocks[b].bits.id].invisible) {
-                    u8 index = 0;
-
-                    /* calculate bitmasking */
-                    i32 worldTileX = i * CHUNK_SIZE + localBlockX;
-                    i32 worldTileY = j * CHUNK_SIZE + localBlockY;
-
-                    Tile* top = getTileReadOnly(worldTileX, worldTileY - 1, map);
-                    if (top != NULL && Blocks[top->bits.id].solid) {
-                        index |= 1;
-                    }
-
-                    Tile* right = getTileReadOnly(worldTileX + 1, worldTileY, map);
-                    if (right != NULL && Blocks[right->bits.id].solid) {
-                        index |= 2;
-                    }
-
-                    Tile* bottom = getTileReadOnly(worldTileX, worldTileY + 1, map);
-                    if (bottom != NULL && Blocks[bottom->bits.id].solid) {
-                        index |= 4;
-                    }
-
-                    Tile* left = getTileReadOnly(worldTileX - 1, worldTileY, map);
-                    if (left != NULL && Blocks[left->bits.id].solid) {
-                        index |= 8;
-                    }
-
-                    Rectangle dest = {.x = (index * 8) % 32,
-                                      .y = ((float)(index * 8) / 32) * 8,
-                                      .width = 8, .height = 8};
-
-                    DrawTexturePro(Blocks[chunk->blocks[b].bits.id].texture,
-                                  dest,
-                                  (Rectangle){
-                                      .x = drawX, .y = drawY,
-                                      .width = BLOCK_SIZE, .height = BLOCK_SIZE
-                                  },
-                                  (Vector2)  {.x = 0, .y = 0},
-                                  0.0f,
-                                  (Color){255, 255, 255, 255}
-                    );
-                    drewFG = true;
-                }
-
-                if (!drewFG) {
-                    switch (chunk->bg[b].bits.id) {
-                    case 1: ;
-                        DrawRectangle(drawX, drawY,
-                                      BLOCK_SIZE, BLOCK_SIZE,
-                                      (Color) {.r = 150 * 0.5, .g = 75 * 0.5, .b = 0 * 0.5, .a = 255});
-                        break;
-
-                    case 2:
-                        DrawRectangle(drawX, drawY,
-                                      BLOCK_SIZE, BLOCK_SIZE,
-                                      (Color) {.r = 124 * 0.5, .g = 189 * 0.5, .b = 107 * 0.5, .a = 255});
-                        break;
-
-                    case 3:
-                        DrawRectangle(drawX, drawY,
-                                      BLOCK_SIZE, BLOCK_SIZE,
-                                      (Color) {.r = 149 * 0.5, .g = 150 * 0.5, .b = 149 * 0.5, .a = 255});
-                        break;
-                    }
-                }
+            if (*fluidUpdate > (float)FLUID_UPDATE_INTERVAL) {
+                (*tc)++;
+                simulateFluids(chunk, i, j, map, *tc);
+                zeroFC = true;
             }
 
+            renderChunk(chunk, x, y, i, j, map);
             /* debug overlay */
             if (IsKeyDown(KEY_GRAVE)) {
                 i32 worldX = (i * CHUNK_SIZE * BLOCK_SIZE);
@@ -879,10 +1122,23 @@ void updateChunks(ChunkMap *map, i32 x, i32 y, i32 renderDistChunks) {
 
                 i32 worldY = (j * CHUNK_SIZE * BLOCK_SIZE);
                 i32 projY = worldY - y;
-                DrawRectangleLines(projX, projY, CHUNK_SIZE * BLOCK_SIZE, CHUNK_SIZE * BLOCK_SIZE, 
+                DrawRectangleLines(projX, projY, CHUNK_SIZE * BLOCK_SIZE, CHUNK_SIZE * BLOCK_SIZE,
                               (Color){.r = 255, .g = 0, .b = 0, .a = 255});
             }
         }
+    }
+
+    if (*fluidUpdate > (float)FLUID_UPDATE_INTERVAL) {
+        for (i32 i = centerChunkX - renderDistChunks; i < centerChunkX + renderDistChunks; i++) {
+            for (i32 j = centerChunkY - renderDistChunks; j < centerChunkY + renderDistChunks; j++) {
+                Chunk *chunk = getChunkMut(map, i, j);
+                clearAllBits(chunk);
+            }
+        }
+    }
+
+    if (zeroFC) {
+        *fluidUpdate = true;
     }
 }
 
@@ -927,7 +1183,7 @@ HitboxBounds collisionDetectandResolve(Player *p, ChunkMap *map, bool drawDebug,
     p->hb.h = PLAYER_HEIGHT;
 
     float left, right, top, bottom;
-    int minX, maxX, minY, maxY;
+    i32 minX, maxX, minY, maxY;
 
     #define CALC_BOUNDS do { \
         left   = posGetAbsX(p->pos) + p->hb.x; \
@@ -935,10 +1191,10 @@ HitboxBounds collisionDetectandResolve(Player *p, ChunkMap *map, bool drawDebug,
         top    = posGetAbsY(p->pos) + p->hb.y; \
         bottom = posGetAbsY(p->pos) + p->hb.y + p->hb.h - EPSILON; \
         \
-        minX = (int)floor(left / BLOCK_SIZE); \
-        maxX = (int)floor(right / BLOCK_SIZE); \
-        minY = (int)floor(top / BLOCK_SIZE); \
-        maxY = (int)floor(bottom / BLOCK_SIZE); \
+        minX = (i32)floor(left / BLOCK_SIZE); \
+        maxX = (i32)floor(right / BLOCK_SIZE); \
+        minY = (i32)floor(top / BLOCK_SIZE); \
+        maxY = (i32)floor(bottom / BLOCK_SIZE); \
     } while (0)
 
     /* X MOVEMENT */
@@ -951,14 +1207,14 @@ HitboxBounds collisionDetectandResolve(Player *p, ChunkMap *map, bool drawDebug,
 
         CALC_BOUNDS;
 
-        for (int y = minY; y <= maxY; y++) {
-            for (int x = minX; x <= maxX; x++) {
+        for (i32 y = minY; y <= maxY; y++) {
+            for (i32 x = minX; x <= maxX; x++) {
                 Tile *t = getTile(x, y, map);
                 bool resetVel = true;
 
                 if (t != NULL && t->bits.id != 0) {
                     if (p->velX > 0) { /* Moving Right */
-                        int newx = x * BLOCK_SIZE - p->hb.w - p->hb.x;
+                        i32 newx = x * BLOCK_SIZE - p->hb.w - p->hb.x;
                         p->pos = posNormalize((Position){.cx = 0, .cy = p->pos.cy,
                                                          .lx = (float) newx, .ly = p->pos.ly});
 
@@ -974,7 +1230,7 @@ HitboxBounds collisionDetectandResolve(Player *p, ChunkMap *map, bool drawDebug,
                             }
                         }
                     } else if (p->velX < 0) { /* Moving Left */
-                            int newx = (x + 1) * BLOCK_SIZE - p->hb.x;
+                            i32 newx = (x + 1) * BLOCK_SIZE - p->hb.x;
                             p->pos = posNormalize((Position){.cx = 0, .cy = p->pos.cy,
                                                              .lx = (float) newx, .ly = p->pos.ly});
 
@@ -990,8 +1246,8 @@ HitboxBounds collisionDetectandResolve(Player *p, ChunkMap *map, bool drawDebug,
                                 }
                             }
                     }
-                    int screenX = (x * BLOCK_SIZE) - (int)posGetAbsX(cam->pos) + (HALF_SCREEN_W);
-                    int screenY = (y * BLOCK_SIZE) - (int)posGetAbsY(cam->pos) + (HALF_SCREEN_H);
+                    i32 screenX = (x * BLOCK_SIZE) - (i32)posGetAbsX(cam->pos) + (HALF_SCREEN_W);
+                    i32 screenY = (y * BLOCK_SIZE) - (i32)posGetAbsY(cam->pos) + (HALF_SCREEN_H);
 
                     if (drawDebug)
                         DrawRectangle(screenX, screenY, BLOCK_SIZE, BLOCK_SIZE, (Color){ 255, 0, 0, 100 });
@@ -1017,8 +1273,8 @@ HitboxBounds collisionDetectandResolve(Player *p, ChunkMap *map, bool drawDebug,
         CALC_BOUNDS;
 
         p->onGround = false;
-        for (int y = minY; y <= maxY; y++) {
-            for (int x = minX; x <= maxX; x++) {
+        for (i32 y = minY; y <= maxY; y++) {
+            for (i32 x = minX; x <= maxX; x++) {
                 Tile *t = getTile(x, y, map);
 
                 if (t != NULL && t->bits.id != 0) {
@@ -1037,8 +1293,8 @@ HitboxBounds collisionDetectandResolve(Player *p, ChunkMap *map, bool drawDebug,
                     }
                     p->velY = 0;
 
-                    int screenX = (x * BLOCK_SIZE) - (int)posGetAbsX(cam->pos) + (HALF_SCREEN_W);
-                    int screenY = (y * BLOCK_SIZE) - (int)posGetAbsY(cam->pos) + (HALF_SCREEN_H);
+                    i32 screenX = (x * BLOCK_SIZE) - (i32)posGetAbsX(cam->pos) + (HALF_SCREEN_W);
+                    i32 screenY = (y * BLOCK_SIZE) - (i32)posGetAbsY(cam->pos) + (HALF_SCREEN_H);
                     if (drawDebug)
                         DrawRectangle(screenX, screenY, BLOCK_SIZE, BLOCK_SIZE, (Color){255, 0, 0, 100});
                     goto endy;
@@ -1119,8 +1375,9 @@ void updatePlayer(Player *p, float dt, Camera *cam, ChunkMap *map, PackedTexture
         return;
     }
 
-    Tile *mTile       =   getTile(mtx, mty, map);
-    Bg   *mBackground = getBgTile(mtx, mty, map);
+    Tile  *mTile       =   getTile(mtx, mty, map);
+    Fluid *mFluid      =   writeFluid(mtx, mty, map);
+    Bg    *mBackground =   getBgTile(mtx, mty, map);
 
     // DrawRectangle(tileScreenX, tileScreenY, BLOCK_SIZE, BLOCK_SIZE,
     //               (Color){11, 11, 11, 255 * p->focusTime / Blocks[mTile->bits.id].hardness});
@@ -1129,7 +1386,7 @@ void updatePlayer(Player *p, float dt, Camera *cam, ChunkMap *map, PackedTexture
         float hardness = Blocks[mTile->bits.id].hardness;
 
         if (hardness > 0.0f) {
-            int ind = (p->focusTime / Blocks[mTile->bits.id].hardness) * breakText.numVariants;
+            i32 ind = MIN((p->focusTime / Blocks[mTile->bits.id].hardness) * breakText.numVariants, breakText.numVariants - 1);
             DrawText(TextFormat("IND: %d", ind),  40, 400, 30, BLACK);
             Texture2D toDraw = breakText.texture[ind];
             DrawTexture(toDraw, tileScreenX, tileScreenY, WHITE);
@@ -1156,7 +1413,7 @@ void updatePlayer(Player *p, float dt, Camera *cam, ChunkMap *map, PackedTexture
                                        pBounds.top < tBottom && pBounds.bottom > tTop);
             if (!playerOverlapsTile) {
                 if (mBackground->bits.id != 0) {
-                    mTile->bits.id = 1;
+                    mFluid->bits.level = 16;
                 } else {
                     Tile *leftTile  = getTile(mtx - 1, mty, map);
                     Tile *rightTile = getTile(mtx + 1, mty, map);
@@ -1168,8 +1425,13 @@ void updatePlayer(Player *p, float dt, Camera *cam, ChunkMap *map, PackedTexture
                         leftTile->bits.id != 0  ||
                         upTile->bits.id != 0    ||
                         downTile->bits.id != 0
-                    )
-                        mTile->bits.id = 1;
+                    ) {
+                        if (IsKeyDown(KEY_LEFT_SHIFT)) {
+                           getBgTile(mtx, mty, map)->bits.id = 1;
+                        } else {
+                            mTile->bits.id = 1;
+                        }
+                    }
                 }
             }
         }
@@ -1193,16 +1455,18 @@ void drawPlayer(Player *p, Camera *cam) {
 typedef struct Game {
     Camera camera;
     ChunkMap *chunkMap;
+    PackedTexture breakingTexture;
     Player player;
     float dtMod;
-    PackedTexture breakingTexture;
-    int (*init)(struct Game *game);
-    int (*update)(struct Game *game);
-    int (*end)(struct Game *game);
+    float fluidUpdateCounter;
+    u32 tickCount;
+    i32 (*init)(struct Game *game);
+    i32 (*update)(struct Game *game);
+    i32 (*end)(struct Game *game);
 } Game;
 
-int runGame(Game game) {
-    int result = game.init(&game);
+i32 runGame(Game game) {
+    i32 result = game.init(&game);
     if (result)
         return result;
 
@@ -1219,8 +1483,8 @@ PackedTexture generateBreakingTextures(i32 seed, Texture2D *text, i32 frames) {
     }
 
     Image base = GenImageColor(BLOCK_SIZE, BLOCK_SIZE, BLANK);
-    for (int x = 0; x < base.width; x++) {
-        for (int y = 0; y < base.height; y++) {
+    for (i32 x = 0; x < base.width; x++) {
+        for (i32 y = 0; y < base.height; y++) {
             double noise = noise_2d(x * 0.2, y * 0.2, seed);
             if (noise < 0.1 && noise > -0.1)
                 ImageDrawPixel(&base, x, y, (Color) {0, 0, 0, 255});
@@ -1228,9 +1492,9 @@ PackedTexture generateBreakingTextures(i32 seed, Texture2D *text, i32 frames) {
     }
 
     Image workingImg = GenImageColor(BLOCK_SIZE, BLOCK_SIZE, BLANK);
-    for (int i = 0; i < frames; i++) {
-        for (int x = 0; x < base.width; x++) {
-            for (int y = 0; y < base.height; y++) {
+    for (i32 i = 0; i < frames; i++) {
+        for (i32 x = 0; x < base.width; x++) {
+            for (i32 y = 0; y < base.height; y++) {
                 PointF curP = {x, y};
                 PointF cenP = {HALF_BLOCK_SIZE, HALF_BLOCK_SIZE};
                 float threshold = BLOCK_SIZE * ((float)i + 1) / frames;
@@ -1249,7 +1513,7 @@ PackedTexture generateBreakingTextures(i32 seed, Texture2D *text, i32 frames) {
         .numVariants = frames,
     };
 }
-int initGame(Game *game) {
+i32 initGame(Game *game) {
     game->dtMod = 1.0f;
 
     InitWindow(1920, 1080, "random block game idk bro");
@@ -1282,7 +1546,7 @@ int initGame(Game *game) {
     return 0;
 }
 
-int updateGame(Game *game) {
+i32 updateGame(Game *game) {
     frame++;
     if (WindowShouldClose()) {
         printf("WINDOW CLOSING\n");
@@ -1296,9 +1560,18 @@ int updateGame(Game *game) {
 
     dt *= game->dtMod;
 
+    game->fluidUpdateCounter += dt;
+
     BeginDrawing();
     ClearBackground(SKYBLUE);
-    updateChunks(game->chunkMap, posGetAbsX(game->camera.pos), posGetAbsY(game->camera.pos), 3);
+    updateChunks(game->chunkMap,
+                 posGetAbsX(game->camera.pos),
+                 posGetAbsY(game->camera.pos),
+                 3,
+                 &game->fluidUpdateCounter,
+                 &game->tickCount
+    );
+
     updatePlayer(&game->player, dt, &game->camera, game->chunkMap, game->breakingTexture);
     drawPlayer(&game->player, &game->camera);
     DrawFPS(5, 5);
@@ -1307,14 +1580,14 @@ int updateGame(Game *game) {
     return 1;
 }
 
-int endGame(Game *game) {
+i32 endGame(Game *game) {
     free(game->chunkMap);
     free(game->breakingTexture.texture);
     CloseWindow();
     return 0;
 }
 
-int main() {
+i32 main() {
     Game game;
     game.init = initGame;
     game.update = updateGame;
