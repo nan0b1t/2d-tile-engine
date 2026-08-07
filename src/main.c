@@ -157,17 +157,6 @@ typedef struct BlockDef {
     float hardness;
 } BlockDef;
 
-// PackedTexture dirtTexture(Image *imgs, int variants) {
-//     if (imgs == NULL) {
-//         CRITICAL_ERROR("null pointer passed to *imgs")
-//         exit(1);
-//     }
-//
-//     // Image baseImg = GenImageColor(8, 8, (Color){120, 64, 8, 255});
-//     return (PackedTexture) {0};
-// }
-
-
 BlockDef Blocks[] = {
     {
         .name = "Air",
@@ -179,25 +168,24 @@ BlockDef Blocks[] = {
     },
     {
         .name = "Dirt",
-        .texturePath = "assets/blocks/dirt.png",
+        .texturePath = "assets/blocks/fdirt.png",
         .solid = true,
         .invisible = false,
         .hardness = 0.5
     },
     {
         .name = "Grass",
-        .texturePath = "assets/blocks/grass.png",
+        .texturePath = "assets/blocks/fgrass.png",
         .solid = true,
         .invisible = false,
         .hardness = 1
     },
     {
-        .invisible = true,
-        .solid = true
-    },
-    {
-        .invisible = true,
-        .solid = true
+        .name = "Stone",
+        .texturePath = "assets/blocks/stone.png",
+        .invisible = false,
+        .solid = true,
+        .hardness = 2
     },
     {
         .invisible = true,
@@ -269,24 +257,13 @@ double lerp(double t, double a, double b) {
 enum { SLOT_EMPTY = 0, SLOT_FULL = 1, TOMBSTONE = 2 };
 
 typedef struct BlockBits {
-    u16 id     : 13;
-    u16 damage :  3;
+    u16 id     : 16;
 } BlockBits;
-
-typedef struct BgBits {
-    u16 id     : 13;
-    u16 damage :  3;
-} BgBits;
 
 typedef union Tile {
     BlockBits bits;
     u16       data;
 } Tile;
-
-typedef union Bg {
-    BgBits bits;
-    u16    data;
-} Bg;
 
 typedef struct FluidBits {
     u8 type  : 3;
@@ -303,20 +280,20 @@ typedef union Fluid {
 
 typedef struct Chunk {
     Tile  blocks[CHUNK_SIZE * CHUNK_SIZE];
-    Bg    bg[CHUNK_SIZE * CHUNK_SIZE];
+    Tile    bg[CHUNK_SIZE * CHUNK_SIZE];
     Fluid fluids[CHUNK_SIZE * CHUNK_SIZE];
     u64   fluidMarkers[NUM_WORDS]; /* used for marking if fluid has been simulated already */
 } Chunk;
 
-void setFluidBit(size_t index, Chunk *c) {
+inline void setFluidBit(size_t index, Chunk *c) {
     c->fluidMarkers[index / WORD_BITS] |= (1ULL << (index % WORD_BITS));
 }
 
-void clearFluidBit(size_t index, Chunk *c) {
+inline void clearFluidBit(size_t index, Chunk *c) {
     c->fluidMarkers[index / WORD_BITS] &= ~(1ULL << (index % WORD_BITS));
 }
 
-i32 getFluidBit(size_t index, Chunk *c) {
+inline i32 getFluidBit(size_t index, Chunk *c) {
     return (c->fluidMarkers[index / WORD_BITS] >> (index % WORD_BITS)) & 1;
 }
 
@@ -393,7 +370,7 @@ typedef struct PackedTileMut { /* used for gameplay code, not high performance l
     Chunk *chunk;
     i32    index;
     Tile  *tile;
-    Bg    *bg;
+    Tile  *bg;
     Fluid *fluid;
 } PackedTileMut;
 
@@ -401,7 +378,7 @@ typedef struct PackedTile { /* used for gameplay code, not high performance loop
     const Chunk *chunk;
     const i32    index;
     const Tile  *tile;
-    const Bg    *bg;
+    const Tile  *bg;
     const Fluid *fluid;
 } PackedTile;
 
@@ -677,7 +654,7 @@ double noise_2d(double x, double y, i32 seed) {
     return lerp(v, topBlend, bottomBlend);
 }
 
-Tile* getTileReadOnly(i32 worldX, i32 worldY, ChunkMap* map) {
+const Tile* getTileReadOnly(i32 worldX, i32 worldY, ChunkMap* map) {
     i32 cx = worldX >> 5;
     i32 cy = worldY >> 5;
 
@@ -715,7 +692,8 @@ Tile *getTile(i32 x, i32 y, ChunkMap *map) {
 
     ChunkPair pair = touchChunk(map, cx, cy);
     if (pair.chunk == NULL) {
-        return NULL; /* table full */
+        CRITICAL_ERROR("CHUNK POOL EXAUSHTED, CANNOT GET BLOCK");
+        abort();
     }
 
     pair.meta->dirty = true;
@@ -753,7 +731,7 @@ Fluid *writeFluid(i32 x, i32 y, ChunkMap *map) {
     return &chunk->fluids[(localY * 32) + localX];
 }
 
-Bg *getBgTile(i32 x, i32 y, ChunkMap *map) {
+Tile *getBgTile(i32 x, i32 y, ChunkMap *map) {
     i32 cx = x >> 5;
     i32 cy = y >> 5;
 
@@ -762,13 +740,30 @@ Bg *getBgTile(i32 x, i32 y, ChunkMap *map) {
 
     ChunkPair pair = touchChunk(map, cx, cy);
     if (pair.chunk == NULL) {
-        return NULL; /* table full */
+        CRITICAL_ERROR("CHUNK POOL EXAUSHTED, CANNOT GET BLOCK");
+        abort();
     }
 
     pair.meta->dirty = true;
     return &pair.chunk->bg[(localY * 32) + localX];
 }
 
+const Tile *getBgTileReadOnly(i32 x, i32 y, ChunkMap *map) {
+    i32 cx = x >> 5;
+    i32 cy = y >> 5;
+
+    i32 localX = x & 31;
+    i32 localY = y & 31;
+
+    ChunkPair pair = touchChunk(map, cx, cy);
+    if (pair.chunk == NULL) {
+        CRITICAL_ERROR("CHUNK POOL EXAUSHTED, CANNOT GET BLOCK");
+        abort();
+    }
+
+    pair.meta->dirty = true;
+    return &pair.chunk->bg[(localY * 32) + localX];
+}
 
 void setTileFG(i32 x, i32 y, ChunkMap *map, u32 fg) {
 
@@ -821,34 +816,17 @@ void generateChunk(i32 x, i32 y, Chunk *chunk, TableMeta *meta) {
         dirt.data = 0;
         dirt.bits.id = 1;
 
-        Bg dirtBg;
-        dirtBg.data = 0;
-        dirtBg.bits.id = 1;
-
         Tile grass;
         grass.data = 0;
         grass.bits.id = 2;
-
-        Bg grassBg;
-        grassBg.data = 0;
-        grassBg.bits.id = 2;
 
         Tile stone;
         stone.data = 0;
         stone.bits.id = 3;
 
-        Bg stoneBg;
-        stoneBg.data = 0;
-        stoneBg.bits.id = 3;
-
         Tile lava;
         lava.data = 0;
         lava.bits.id = 4;
-
-        Bg lavaBg;
-        lavaBg.data = 0;
-        lavaBg.bits.id = 4;
-
 
         i32 grassStart = colVal;
         i32 dirtStart  = grassStart + 2;
@@ -863,17 +841,17 @@ void generateChunk(i32 x, i32 y, Chunk *chunk, TableMeta *meta) {
                 chunk->bg[j * CHUNK_SIZE + i].data = 0;
             } else if (projY < dirtStart) {
                 chunk->blocks[j * CHUNK_SIZE + i].data = grass.data;
-                chunk->bg[j * CHUNK_SIZE + i].data = grassBg.data;
+                chunk->bg[j * CHUNK_SIZE + i].data = grass.data;
             } else if (projY < stoneStart) {
                 chunk->blocks[j * CHUNK_SIZE + i].data = dirt.data;
-                chunk->bg[j * CHUNK_SIZE + i].data = dirtBg.data;
+                chunk->bg[j * CHUNK_SIZE + i].data = dirt.data;
             } else {
                 if (worldY < 200) {
                     chunk->blocks[j * CHUNK_SIZE + i].data = stone.data;
-                    chunk->bg[j * CHUNK_SIZE + i].data = stoneBg.data;
+                    chunk->bg[j * CHUNK_SIZE + i].data = stone.data;
                 } else {
                     chunk->blocks[j * CHUNK_SIZE + i].data = lava.data;
-                    chunk->bg[j * CHUNK_SIZE + i].data = lavaBg.data;
+                    chunk->bg[j * CHUNK_SIZE + i].data = lava.data;
                 }
             }
 
@@ -909,28 +887,28 @@ void renderChunk(Chunk *chunk, i32 x, i32 y, i32 i, i32 j, ChunkMap *map) {
             i32 worldTileX = i * CHUNK_SIZE + localBlockX;
             i32 worldTileY = j * CHUNK_SIZE + localBlockY;
 
-            Tile* top = getTileReadOnly(worldTileX, worldTileY - 1, map);
+            const Tile* top = getTileReadOnly(worldTileX, worldTileY - 1, map);
             if (top != NULL && Blocks[top->bits.id].solid) {
                 index |= 1;
             }
 
-            Tile* right = getTileReadOnly(worldTileX + 1, worldTileY, map);
+            const Tile* right = getTileReadOnly(worldTileX + 1, worldTileY, map);
             if (right != NULL && Blocks[right->bits.id].solid) {
                 index |= 2;
             }
 
-            Tile* bottom = getTileReadOnly(worldTileX, worldTileY + 1, map);
+            const Tile* bottom = getTileReadOnly(worldTileX, worldTileY + 1, map);
             if (bottom != NULL && Blocks[bottom->bits.id].solid) {
                 index |= 4;
             }
 
-            Tile* left = getTileReadOnly(worldTileX - 1, worldTileY, map);
+            const Tile* left = getTileReadOnly(worldTileX - 1, worldTileY, map);
             if (left != NULL && Blocks[left->bits.id].solid) {
                 index |= 8;
             }
 
             Rectangle dest = {.x = (index * 8) % 32,
-                              .y = ((float)(index * 8) / 32) * 8,
+                              .y = (int)((index * 8) / 32) * 8,
                               .width = 8, .height = 8};
 
             DrawTexturePro(Blocks[chunk->blocks[b].bits.id].texture,
@@ -946,33 +924,56 @@ void renderChunk(Chunk *chunk, i32 x, i32 y, i32 i, i32 j, ChunkMap *map) {
             drewFG = true;
         }
 
-        if (!drewFG) {
-            switch (chunk->bg[b].bits.id) {
-            case 1: ;
-                DrawRectangle(drawX, drawY,
-                              BLOCK_SIZE, BLOCK_SIZE,
-                              (Color) {.r = 150 * 0.5, .g = 75 * 0.5, .b = 0 * 0.5, .a = 255});
-                break;
+        if (!drewFG && !Blocks[chunk->bg[b].bits.id].invisible) {
+            u8 index = 0;
 
-            case 2:
-                DrawRectangle(drawX, drawY,
-                              BLOCK_SIZE, BLOCK_SIZE,
-                              (Color) {.r = 124 * 0.5, .g = 189 * 0.5, .b = 107 * 0.5, .a = 255});
-                break;
+            /* calculate bitmasking */
+            i32 worldTileX = i * CHUNK_SIZE + localBlockX;
+            i32 worldTileY = j * CHUNK_SIZE + localBlockY;
 
-            case 3:
-                DrawRectangle(drawX, drawY,
-                              BLOCK_SIZE, BLOCK_SIZE,
-                              (Color) {.r = 149 * 0.5, .g = 150 * 0.5, .b = 149 * 0.5, .a = 255});
-                break;
+            const Tile* top = getBgTileReadOnly(worldTileX, worldTileY - 1, map);
+            if (top != NULL && Blocks[top->bits.id].solid) {
+                index |= 1;
             }
+
+            const Tile* right = getBgTileReadOnly(worldTileX + 1, worldTileY, map);
+            if (right != NULL && Blocks[right->bits.id].solid) {
+                index |= 2;
+            }
+
+            const Tile* bottom = getBgTileReadOnly(worldTileX, worldTileY + 1, map);
+            if (bottom != NULL && Blocks[bottom->bits.id].solid) {
+                index |= 4;
+            }
+
+            const Tile* left = getBgTileReadOnly(worldTileX - 1, worldTileY, map);
+            if (left != NULL && Blocks[left->bits.id].solid) {
+                index |= 8;
+            }
+
+            Rectangle dest = {.x = (index * 8) % 32,
+                              .y = (int)((index * 8) / 32) * 8,
+                              .width = 8, .height = 8};
+
+            DrawTexturePro(Blocks[chunk->bg[b].bits.id].texture,
+                          dest,
+                          (Rectangle){
+                              .x = drawX, .y = drawY,
+                              .width = BLOCK_SIZE, .height = BLOCK_SIZE
+                          },
+                          (Vector2)  {.x = 0, .y = 0},
+                          0.0f,
+                          (Color){255, 255, 255, 255}
+            );
+
+            DrawRectangle(drawX, drawY, 16, 16, (Color) {.r = 0, .g = 0, .b = 0, .a = 128});
         }
 
         if (chunk->fluids[b].bits.level > 0) {
             i32 height = chunk->fluids[b].bits.level;
             DrawRectangle(drawX, drawY + BLOCK_SIZE - height, BLOCK_SIZE, height, (Color){87, 227, 237, 127});
         }
-}
+    }
     }
 
 void simulateFluids(Chunk *chunk, i32 i, i32 j, ChunkMap *map, u32 tickCount) {
@@ -1377,7 +1378,7 @@ void updatePlayer(Player *p, float dt, Camera *cam, ChunkMap *map, PackedTexture
 
     Tile  *mTile       =   getTile(mtx, mty, map);
     Fluid *mFluid      =   writeFluid(mtx, mty, map);
-    Bg    *mBackground =   getBgTile(mtx, mty, map);
+    Tile  *mBackground =   getBgTile(mtx, mty, map);
 
     // DrawRectangle(tileScreenX, tileScreenY, BLOCK_SIZE, BLOCK_SIZE,
     //               (Color){11, 11, 11, 255 * p->focusTime / Blocks[mTile->bits.id].hardness});
@@ -1537,7 +1538,6 @@ i32 initGame(Game *game) {
     for (size_t i = 0; i < (sizeof Blocks) / sizeof(*Blocks); i++)
         if (!Blocks[i].invisible) {
             Image ogImage = LoadImage(Blocks[i].texturePath);
-            ImageResize(&ogImage, 8, 8);
             Blocks[i].texture = LoadTextureFromImage(ogImage);
             UnloadImage(ogImage);
         }

@@ -1,0 +1,3 @@
+[INFO] running in release mode
+[INFO] directory `build` already exists
+[INFO] CMD: cc -std=c99 -Wall -Wextra -Werror -pedantic -Wwrite-strings -Wshadow -Wdouble-promotion -Wno-conversion -O3 src/main.c -o build/game -lm -lraylib

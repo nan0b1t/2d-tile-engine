@@ -58,7 +58,6 @@ int main(int argc, char **argv) {
     nob_cmd_append(&cmd, "-Wextra");
     nob_cmd_append(&cmd, "-Werror");
     nob_cmd_append(&cmd, "-pedantic");
-    nob_cmd_append(&cmd, "-Wnull-dereference");
     nob_cmd_append(&cmd, "-Wwrite-strings");
     nob_cmd_append(&cmd, "-Wshadow");
     nob_cmd_append(&cmd, "-Wdouble-promotion");
