@@ -1430,7 +1430,7 @@ void updatePlayer(Player *p, float dt, Camera *cam, ChunkMap *map, PackedTexture
                         if (IsKeyDown(KEY_LEFT_SHIFT)) {
                            getBgTile(mtx, mty, map)->bits.id = 1;
                         } else {
-                            mTile->bits.id = 1;
+                            mTile->bits.id = 2;
                         }
                     }
                 }
